@@ -10,6 +10,7 @@ import SwiftUI
 // MARK: - Liquid Glass Container
 struct LiquidGlassContainer<Content: View>: View {
     var content: Content
+    @AppStorage("glassOpacity") private var glassOpacity: Double = 0.85
 
     init(@ViewBuilder content: () -> Content) {
         self.content = content()
@@ -19,14 +20,14 @@ struct LiquidGlassContainer<Content: View>: View {
         content
             .background(
                 VisualEffectBlur(material: .hudWindow, blendingMode: .behindWindow)
-                    .opacity(0.85)
+                    .opacity(glassOpacity)
             )
             .background(
                 // 玻璃光泽效果
                 LinearGradient(
                     colors: [
-                        Color.white.opacity(0.15),
-                        Color.white.opacity(0.05),
+                        Color.white.opacity(0.15 * glassOpacity),
+                        Color.white.opacity(0.05 * glassOpacity),
                         Color.clear
                     ],
                     startPoint: .topLeading,
@@ -40,9 +41,9 @@ struct LiquidGlassContainer<Content: View>: View {
                     .stroke(
                         LinearGradient(
                             colors: [
-                                Color.white.opacity(0.3),
-                                Color.white.opacity(0.1),
-                                Color.white.opacity(0.05)
+                                Color.white.opacity(0.3 * glassOpacity),
+                                Color.white.opacity(0.1 * glassOpacity),
+                                Color.white.opacity(0.05 * glassOpacity)
                             ],
                             startPoint: .topLeading,
                             endPoint: .bottomTrailing
@@ -90,12 +91,12 @@ struct FloatingCard<Content: View>: View {
             .padding(12)
             .background(
                 RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .fill(isSelected ? Color.accentColor.opacity(0.25) : Color.white.opacity(0.08))
+                    .fill(isSelected ? Color.accentColor.opacity(0.25) : Color.primary.opacity(0.08))
             )
             .overlay(
                 RoundedRectangle(cornerRadius: 12, style: .continuous)
                     .stroke(
-                        isSelected ? Color.accentColor.opacity(0.5) : Color.white.opacity(0.1),
+                        isSelected ? Color.accentColor.opacity(0.5) : Color.primary.opacity(0.1),
                         lineWidth: isSelected ? 1.5 : 1
                     )
             )

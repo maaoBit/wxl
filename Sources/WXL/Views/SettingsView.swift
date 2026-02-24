@@ -25,9 +25,19 @@ struct SettingsView: View {
                 Label("通用", systemImage: "gearshape")
             }
 
+            AppearanceSettingsView()
+                .tabItem {
+                    Label("外观", systemImage: "paintbrush")
+                }
+
             ShortcutsSettingsView()
                 .tabItem {
                     Label("快捷键", systemImage: "keyboard")
+                }
+
+            MCPSettingsView()
+                .tabItem {
+                    Label("MCP", systemImage: "network")
                 }
 
             AboutView()
@@ -100,6 +110,36 @@ struct GeneralSettingsView: View {
                 try? service.unregister()
             }
         }
+    }
+}
+
+// MARK: - Appearance Settings
+struct AppearanceSettingsView: View {
+    @AppStorage("glassOpacity") private var glassOpacity: Double = 0.85
+
+    var body: some View {
+        Form {
+            Section("玻璃效果") {
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack {
+                        Text("背景透明度")
+                        Spacer()
+                        Text("\(Int(glassOpacity * 100))%")
+                            .foregroundStyle(.secondary)
+                            .frame(width: 40, alignment: .trailing)
+                    }
+
+                    Slider(value: $glassOpacity, in: 0.3...1.0, step: 0.05)
+                        .labelsHidden()
+
+                    Text("调低透明度可使窗口更透明，调高则更实心。在白色背景下建议调高透明度以提高文字可读性。")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+        .formStyle(.grouped)
+        .padding()
     }
 }
 
@@ -204,5 +244,118 @@ struct AboutView: View {
         }
         .padding()
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+}
+
+// MARK: - MCP Settings
+struct MCPSettingsView: View {
+    @AppStorage("mcpEnabled") private var mcpEnabled: Bool = true
+    @AppStorage("mcpPort") private var mcpPort: Int = 9527
+    @State private var serverStatus: String = "未知"
+
+    let portOptions = [9527, 9528, 9529, 9530]
+
+    var body: some View {
+        Form {
+            Section("服务器设置") {
+                Toggle("启用 MCP 服务器", isOn: $mcpEnabled)
+                    .onChange(of: mcpEnabled) { _, newValue in
+                        if newValue {
+                            MCPServer.shared.start()
+                        } else {
+                            MCPServer.shared.stop()
+                        }
+                        updateServerStatus()
+                    }
+
+                LabeledContent("端口") {
+                    Picker("", selection: $mcpPort) {
+                        ForEach(portOptions, id: \.self) { port in
+                            Text("\(port)").tag(port)
+                        }
+                    }
+                    .frame(width: 100)
+                    .onChange(of: mcpPort) { _, _ in
+                        MCPServer.shared.restart()
+                        updateServerStatus()
+                    }
+                }
+
+                LabeledContent("状态") {
+                    HStack(spacing: 6) {
+                        Circle()
+                            .fill(serverStatus == "运行中" ? Color.green : Color.red)
+                            .frame(width: 8, height: 8)
+                        Text(serverStatus)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+
+            Section("Claude Code 配置") {
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("在 Claude Code 中运行以下命令添加 MCP 服务器：")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
+                    Text("claude mcp add --transport http wxl http://127.0.0.1:\(mcpPort)/mcp")
+                        .font(.system(.body, design: .monospaced))
+                        .padding(8)
+                        .background(Color.secondary.opacity(0.1))
+                        .clipShape(RoundedRectangle(cornerRadius: 4))
+                        .textSelection(.enabled)
+                }
+            }
+
+            Section("可用工具") {
+                VStack(alignment: .leading, spacing: 8) {
+                    toolRow("get_clipboard_history", "获取剪贴板历史记录")
+                    toolRow("search_clipboard", "搜索剪贴板内容")
+                    toolRow("generate_note", "从剪贴板项目生成笔记")
+                }
+            }
+        }
+        .formStyle(.grouped)
+        .padding()
+        .onAppear {
+            updateServerStatus()
+        }
+    }
+
+    private func toolRow(_ name: String, _ description: String) -> some View {
+        HStack {
+            Text(name)
+                .font(.system(.body, design: .monospaced))
+            Spacer()
+            Text(description)
+                .foregroundStyle(.secondary)
+                .font(.caption)
+        }
+    }
+
+    private func updateServerStatus() {
+        DispatchQueue.global(qos: .utility).async {
+            // 检查端口是否在监听
+            let task = Process()
+            task.executableURL = URL(fileURLWithPath: "/usr/sbin/lsof")
+            task.arguments = ["-i", ":\(mcpPort)"]
+
+            let pipe = Pipe()
+            task.standardOutput = pipe
+            task.standardError = pipe
+
+            let status: String
+            do {
+                try task.run()
+                task.waitUntilExit()
+                status = task.terminationStatus == 0 ? "运行中" : "已停止"
+            } catch {
+                status = "未知"
+            }
+
+            DispatchQueue.main.async {
+                serverStatus = status
+            }
+        }
     }
 }

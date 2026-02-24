@@ -31,6 +31,9 @@ struct MCPConfig {
 
         if let port = UserDefaults.standard.object(forKey: "mcpPort") as? UInt16 {
             config.port = port
+        } else if let portInt = UserDefaults.standard.object(forKey: "mcpPort") as? Int,
+                  let port = UInt16(exactly: portInt) {
+            config.port = port
         }
 
         if let enabled = UserDefaults.standard.object(forKey: "mcpEnabled") as? Bool {
@@ -65,10 +68,11 @@ enum MCPServerStatus {
     case error(String)
 
     var description: String {
+        let config = MCPConfig.load()
         switch self {
         case .stopped: return "Stopped"
         case .starting: return "Starting..."
-        case .running: return "Running on http://127.0.0.1:9527"
+        case .running: return "Running on \(config.mcpEndpoint)"
         case .error(let msg): return "Error: \(msg)"
         }
     }

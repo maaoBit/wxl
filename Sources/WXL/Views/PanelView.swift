@@ -10,6 +10,7 @@ import Combine
 
 struct PanelView: View {
     @StateObject private var appState = AppState.shared
+    @FocusState private var isSearchFocused: Bool
 
     var body: some View {
         LiquidGlassContainer {
@@ -30,7 +31,12 @@ struct PanelView: View {
             .padding(16)
         }
         .frame(width: 700, height: 450)
-        .onChange(of: appState.selectedIndex) { newIndex in
+        .onAppear {
+            DispatchQueue.main.async {
+                isSearchFocused = true
+            }
+        }
+        .onChange(of: appState.selectedIndex) { _, newIndex in
             // 确保索引有效
             if newIndex >= appState.filteredItems.count && !appState.filteredItems.isEmpty {
                 appState.selectedIndex = appState.filteredItems.count - 1
@@ -46,7 +52,7 @@ struct PanelView: View {
 
             // 分隔线
             Rectangle()
-                .fill(Color.white.opacity(0.1))
+                .fill(Color.primary.opacity(0.1))
                 .frame(width: 1)
 
             // 右侧：详细内容预览
@@ -61,15 +67,13 @@ struct PanelView: View {
                 .font(.system(size: 14, weight: .medium))
                 .foregroundColor(.secondary)
 
-            // 使用只读 Text 显示搜索内容，键盘输入由 NSPanel 处理
-            if appState.searchText.isEmpty {
-                Text("搜索剪贴板...")
-                    .font(.system(size: 14))
-                    .foregroundColor(.secondary)
-            } else {
-                Text(appState.searchText)
-                    .font(.system(size: 14))
-            }
+            TextField("搜索剪贴板...", text: $appState.searchText)
+                .font(.system(size: 14))
+                .textFieldStyle(.plain)
+                .focused($isSearchFocused)
+                .onSubmit {
+                    pasteSelected()
+                }
 
             Spacer()
 
@@ -83,7 +87,7 @@ struct PanelView: View {
             }
         }
         .padding(12)
-        .background(Color.white.opacity(0.05))
+        .background(Color.primary.opacity(0.05))
         .clipShape(RoundedRectangle(cornerRadius: 10))
         .padding(.bottom, 12)
     }
@@ -168,15 +172,48 @@ struct PanelView: View {
 
                 // 分隔线
                 Rectangle()
-                    .fill(Color.white.opacity(0.1))
+                    .fill(Color.primary.opacity(0.1))
                     .frame(height: 1)
 
                 // 完整内容
                 ScrollView {
                     if item.contentType == .image, let imageData = item.imageData, let nsImage = NSImage(data: imageData) {
-                        Image(nsImage: nsImage)
-                            .resizable()
-                            .aspectRatio(contentMode: .fit)
+                        VStack(alignment: .leading, spacing: 12) {
+                            // 图片
+                            Image(nsImage: nsImage)
+                                .resizable()
+                                .aspectRatio(contentMode: .fit)
+
+                            // OCR 识别结果
+                            if let ocrText = item.ocrText, !ocrText.isEmpty {
+                                VStack(alignment: .leading, spacing: 6) {
+                                    HStack(spacing: 4) {
+                                        Image(systemName: "doc.text.viewfinder")
+                                            .font(.system(size: 10))
+                                        Text("OCR 识别结果")
+                                            .font(.system(size: 10, weight: .medium))
+                                    }
+                                    .foregroundColor(.secondary)
+
+                                    Text(ocrText)
+                                        .font(.system(size: 11))
+                                        .foregroundColor(.primary.opacity(0.8))
+                                        .padding(8)
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                        .background(Color.primary.opacity(0.05))
+                                        .clipShape(RoundedRectangle(cornerRadius: 6))
+                                }
+                            } else {
+                                // OCR 为空时显示提示
+                                HStack(spacing: 4) {
+                                    Image(systemName: "doc.text.viewfinder")
+                                        .font(.system(size: 10))
+                                    Text("OCR: 暂无识别结果")
+                                        .font(.system(size: 10))
+                                }
+                                .foregroundColor(.secondary.opacity(0.5))
+                            }
+                        }
                     } else {
                         Text(item.content)
                             .font(.system(size: 12))
@@ -231,10 +268,10 @@ struct PanelView: View {
         .padding(12)
         .background(
             RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .fill(Color.white.opacity(0.03))
+                .fill(Color.primary.opacity(0.03))
                 .overlay(
                     RoundedRectangle(cornerRadius: 10, style: .continuous)
-                        .stroke(Color.white.opacity(0.08), lineWidth: 1)
+                        .stroke(Color.primary.opacity(0.08), lineWidth: 1)
                 )
         )
     }
@@ -311,11 +348,19 @@ struct PanelView: View {
     private func pasteSelected() {
         guard let item = appState.selectedItem else { return }
 
+        if !item.isPinned {
+            ClipboardStorage.shared.refreshTimestamp(item.id)
+            let items = ClipboardStorage.shared.loadAll()
+            appState.clipboardItems = items
+            appState.selectedIndex = 0
+        }
+
         // 通知监听器忽略即将发生的剪贴板变化
         ClipboardMonitor.shared.setIgnoreNextChange()
 
         copyToClipboard(item.content)
         dismissPanel()
+        NSApplication.shared.hide(nil)
     }
 
     private func togglePin(_ item: ClipboardItem) {

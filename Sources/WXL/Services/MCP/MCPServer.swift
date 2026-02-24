@@ -17,14 +17,26 @@ class MCPServer {
     static let shared = MCPServer()
 
     private var listener: NWListener?
-    private let port: NWEndpoint.Port = 9527 // Default port for WXL MCP
+    private var config: MCPConfig = .load()
     private var connections: [NWConnection] = []
+
+    private var port: NWEndpoint.Port {
+        return NWEndpoint.Port(rawValue: config.port) ?? 9527
+    }
 
     private init() {}
 
     // MARK: - Server Lifecycle
 
     func start() {
+        if listener != nil {
+            stop()
+        }
+
+        config = MCPConfig.load()
+
+        guard config.enabled else { return }
+
         let parameters = NWParameters.tcp
         parameters.allowLocalEndpointReuse = true
 
@@ -38,7 +50,7 @@ class MCPServer {
             listener?.stateUpdateHandler = { [weak self] state in
                 switch state {
                 case .ready:
-                    Logger.log("WXL MCP HTTP Server started on port \(self?.port.rawValue ?? 9527)", category: .general)
+                    Logger.log("MCP Server started on port \(self?.port.rawValue ?? 9527)", category: .general)
                 case .failed(let error):
                     Logger.error("MCP Server failed: \(error)", category: .general)
                 default:
@@ -54,8 +66,14 @@ class MCPServer {
 
     func stop() {
         listener?.cancel()
+        listener = nil
         connections.forEach { $0.cancel() }
         connections.removeAll()
+    }
+
+    func restart() {
+        stop()
+        start()
     }
 
     // MARK: - HTTP Connection Handling

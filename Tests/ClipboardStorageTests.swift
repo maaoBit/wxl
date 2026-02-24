@@ -65,18 +65,38 @@ final class ClipboardStorageTests: XCTestCase {
         let content = "Same content"
 
         let item1 = ClipboardItem(content: content, sourceApp: "App1")
-        storage.save(item1)
+        let result1 = storage.save(item1)
+        XCTAssertTrue(result1)
 
         // 等待一下确保第一个保存完成
         Thread.sleep(forTimeInterval: 0.1)
 
         let item2 = ClipboardItem(content: content, sourceApp: "App2")
-        storage.save(item2)
+        let result2 = storage.save(item2)
+        XCTAssertFalse(result2)
 
         let items = storage.loadAll()
         // 相同内容应该只保留一条，但更新了 sourceApp
         XCTAssertEqual(items.count, 1)
         XCTAssertEqual(items.first?.sourceApp, "App2")
+    }
+
+    func testSave_DuplicateImageData_UpdatesExisting() {
+        let imageData = "image-bytes".data(using: .utf8)
+
+        let item1 = ClipboardItem(content: "[Image]", contentType: .image, imageData: imageData)
+        let result1 = storage.save(item1)
+        XCTAssertTrue(result1)
+
+        // 等待一下确保第一个保存完成
+        Thread.sleep(forTimeInterval: 0.1)
+
+        let item2 = ClipboardItem(content: "[Image]", contentType: .image, imageData: imageData)
+        let result2 = storage.save(item2)
+        XCTAssertFalse(result2)
+
+        let items = storage.loadAll()
+        XCTAssertEqual(items.count, 1)
     }
 
     func testSave_WithAllFields() {
@@ -281,7 +301,47 @@ final class ClipboardStorageTests: XCTestCase {
 
         let results = storage.search(query: "HELLO")
 
-        // SQLite LIKE 默认不区分大小写
+        // 使用 LOWER() 函数实现大小写不敏感
+        XCTAssertEqual(results.count, 1)
+    }
+
+    func testSearch_ChineseContent() {
+        storage.save(ClipboardItem(content: "你好世界"))
+        storage.save(ClipboardItem(content: "测试内容"))
+        storage.save(ClipboardItem(content: "Hello World"))
+
+        let results = storage.search(query: "你好")
+
+        XCTAssertEqual(results.count, 1)
+        XCTAssertEqual(results.first?.content, "你好世界")
+    }
+
+    func testSearch_ChinesePartialMatch() {
+        storage.save(ClipboardItem(content: "这是一个测试"))
+        storage.save(ClipboardItem(content: "其他内容"))
+
+        let results = storage.search(query: "测试")
+
+        XCTAssertEqual(results.count, 1)
+    }
+
+    func testSearch_MixedChineseAndEnglish() {
+        storage.save(ClipboardItem(content: "Hello世界"))
+        storage.save(ClipboardItem(content: "World测试"))
+
+        let results1 = storage.search(query: "hello")
+        let results2 = storage.search(query: "世界")
+
+        XCTAssertEqual(results1.count, 1)
+        XCTAssertEqual(results2.count, 1)
+    }
+
+    func testSearch_CaseInsensitive_MixedCaseContent() {
+        storage.save(ClipboardItem(content: "HeLLo WoRLd"))
+        storage.save(ClipboardItem(content: "Goodbye"))
+
+        let results = storage.search(query: "hello")
+
         XCTAssertEqual(results.count, 1)
     }
 

@@ -17,6 +17,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem!
     private var settingsWindow: NSWindow!
 
+    func applicationWillFinishLaunching(_ notification: Notification) {
+        // 设置为辅助应用，不显示在程序坞
+        NSApp.setActivationPolicy(.accessory)
+    }
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         // 初始化存储
         clipboardStorage = ClipboardStorage.shared
@@ -39,6 +44,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         // 注册全局快捷键
         setupHotKeys()
+
+        // 启动 MCP 服务器
+        let mcpConfig = MCPConfig.load()
+        if mcpConfig.enabled {
+            MCPServer.shared.start()
+        }
     }
 
     private func setupPanel() {
@@ -173,6 +184,7 @@ extension AppDelegate: NSWindowDelegate {
 // MARK: - Custom Panel with Keyboard Handling
 class KeyboardHandlingPanel: NSPanel {
     private var hostingView: NSHostingView<PanelView>? = nil
+    private var eventMonitor: Any?
 
     override var acceptsFirstResponder: Bool {
         return true
@@ -196,6 +208,79 @@ class KeyboardHandlingPanel: NSPanel {
         isOpaque = false
         backgroundColor = .clear
         hasShadow = true
+    }
+
+    override func keyDown(with event: NSEvent) {
+        // 让 SwiftUI 处理，如果 SwiftUI 不处理，再手动处理
+        // 先调用 super 看看是否能被 SwiftUI 处理
+        super.keyDown(with: event)
+    }
+
+    func setupKeyEventMonitor() {
+        // 移除旧的监听器
+        if let monitor = eventMonitor {
+            NSEvent.removeMonitor(monitor)
+        }
+
+        // 添加本地事件监听器
+        eventMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            guard let self = self, self.isVisible else { return event }
+
+            let keyCode = event.keyCode
+            let flags = event.modifierFlags
+            let charsIgnoringModifiers = event.charactersIgnoringModifiers ?? ""
+
+            // 始终处理 Escape
+            if keyCode == 53 {
+                self.hide()
+                return nil
+            }
+
+            // Command 组合键始终有效
+            if flags.contains(.command) {
+                let char = charsIgnoringModifiers.lowercased()
+                if char == "p" {
+                    self.togglePinSelected()
+                    return nil
+                }
+                if char == "d" {
+                    self.deleteSelected()
+                    return nil
+                }
+                if keyCode == 36 {
+                    self.performAction()
+                    return nil
+                }
+            }
+
+            // Return 键
+            if keyCode == 36 {
+                self.pasteSelected()
+                return nil
+            }
+
+            // 上下箭头
+            if keyCode == 126 {
+                AppState.shared.selectedIndex = max(0, AppState.shared.selectedIndex - 1)
+                return nil
+            }
+            if keyCode == 125 {
+                let count = AppState.shared.filteredItems.count
+                if count > 0 {
+                    AppState.shared.selectedIndex = min(count - 1, AppState.shared.selectedIndex + 1)
+                }
+                return nil
+            }
+
+            return event
+        }
+    }
+
+    func removeKeyEventMonitor() {
+        if let monitor = eventMonitor {
+            NSEvent.removeMonitor(monitor)
+            eventMonitor = nil
+        }
     }
 
     func refreshContentView() {
@@ -234,80 +319,24 @@ class KeyboardHandlingPanel: NSPanel {
         makeKeyAndOrderFront(nil)
         NSApplication.shared.activate(ignoringOtherApps: true)
 
+        // 启动键盘事件监听
+        setupKeyEventMonitor()
+
         // 重置状态
         AppState.shared.selectedIndex = 0
         AppState.shared.searchText = ""
     }
 
     func hide() {
+        // 停止键盘事件监听
+        removeKeyEventMonitor()
+
         // 清空搜索文本
         AppState.shared.searchText = ""
         orderOut(nil)
 
         // 隐藏应用，macOS 会自动将焦点返回到之前的应用
         NSApplication.shared.hide(nil)
-    }
-
-    // 直接处理键盘事件
-    override func keyDown(with event: NSEvent) {
-        let keyCode = event.keyCode
-        let flags = event.modifierFlags
-
-        switch keyCode {
-        case 53: // Escape
-            hide()
-
-        case 36: // Return
-            if flags.contains(.command) {
-                // Cmd+Enter - 执行智能动作
-                performAction()
-            } else {
-                // Enter - 粘贴
-                pasteSelected()
-            }
-
-        case 126: // Up Arrow
-            AppState.shared.selectedIndex = max(0, AppState.shared.selectedIndex - 1)
-
-        case 125: // Down Arrow
-            let count = AppState.shared.filteredItems.count
-            if count > 0 {
-                AppState.shared.selectedIndex = min(count - 1, AppState.shared.selectedIndex + 1)
-            }
-
-        case 51: // Backspace
-            // 删除搜索文本的最后一个字符
-            if !AppState.shared.searchText.isEmpty {
-                AppState.shared.searchText.removeLast()
-            }
-
-        case 48: // Tab
-            // Tab 键 - 暂不处理
-            break
-
-        default:
-            // 处理字符键
-            if let chars = event.characters, chars.count == 1 {
-                let char = chars.lowercased()
-
-                // Cmd+P - 置顶
-                if flags.contains(.command) && char == "p" {
-                    togglePinSelected()
-                    return
-                }
-
-                // Cmd+D - 删除
-                if flags.contains(.command) && char == "d" {
-                    deleteSelected()
-                    return
-                }
-
-                // 其他字符添加到搜索文本（仅当没有按 Cmd 时）
-                if !flags.contains(.command) && char != "\u{7f}" {
-                    AppState.shared.searchText += char
-                }
-            }
-        }
     }
 
     private func pasteSelected() {

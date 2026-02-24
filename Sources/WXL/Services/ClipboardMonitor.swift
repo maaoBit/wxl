@@ -46,16 +46,17 @@ class ClipboardMonitor: ObservableObject {
     }
 
     private func checkForChanges() {
-        guard pasteboard.changeCount != changeCount else { return }
+        let currentCount = pasteboard.changeCount
+        guard currentCount != changeCount else { return }
 
         // 如果设置了忽略标志，跳过这次变化
         if ignoreNextChange {
-            changeCount = pasteboard.changeCount
+            changeCount = currentCount
             ignoreNextChange = false
             return
         }
 
-        changeCount = pasteboard.changeCount
+        changeCount = currentCount
         processClipboardContent()
     }
 
@@ -63,17 +64,47 @@ class ClipboardMonitor: ObservableObject {
         // 获取来源应用
         let sourceApp = getActiveApplication()
 
-        // 检查图片
-        if let imageData = pasteboard.data(forType: .png) ?? pasteboard.data(forType: .tiff) {
+        // 检查图片 - 支持多种格式
+        let imageTypes: [NSPasteboard.PasteboardType] = [
+            .png, .tiff,
+            NSPasteboard.PasteboardType("public.jpeg"),
+            NSPasteboard.PasteboardType("public.png"),
+            NSPasteboard.PasteboardType("public.tiff"),
+            NSPasteboard.PasteboardType("public.image"),
+            NSPasteboard.PasteboardType("com.apple.pict"),
+            NSPasteboard.PasteboardType("com.compuserve.gif"),
+            NSPasteboard.PasteboardType("com.microsoft.bmp")
+        ]
+
+        for imageType in imageTypes {
+            if let imageData = pasteboard.data(forType: imageType) {
+                let item = ClipboardItem(
+                    content: "[Image]",
+                    contentType: .image,
+                    sourceApp: sourceApp?.localizedName,
+                    sourceAppBundle: sourceApp?.bundleIdentifier,
+                    imageData: imageData
+                )
+                onNewClip?(item)
+                performOCR(on: imageData, item: item)
+                return
+            }
+        }
+
+        // 尝试从通用图片数据创建 NSImage
+        if let imageData = pasteboard.data(forType: .fileURL),
+           let url = URL(dataRepresentation: imageData, relativeTo: nil),
+           let image = NSImage(contentsOf: url),
+           let tiffData = image.tiffRepresentation {
             let item = ClipboardItem(
                 content: "[Image]",
                 contentType: .image,
                 sourceApp: sourceApp?.localizedName,
                 sourceAppBundle: sourceApp?.bundleIdentifier,
-                imageData: imageData
+                imageData: tiffData
             )
             onNewClip?(item)
-            performOCR(on: imageData, item: item)
+            performOCR(on: tiffData, item: item)
             return
         }
 
@@ -100,34 +131,38 @@ class ClipboardMonitor: ObservableObject {
     }
 
     private func performOCR(on imageData: Data, item: ClipboardItem) {
-        guard let nsImage = NSImage(data: imageData),
-              let cgImage = nsImage.cgImage(forProposedRect: nil, context: nil, hints: nil) else {
-            return
-        }
+        DispatchQueue.global(qos: .userInitiated).async {
+            guard let nsImage = NSImage(data: imageData),
+                  let cgImage = nsImage.cgImage(forProposedRect: nil, context: nil, hints: nil) else {
+                return
+            }
 
-        let request = VNRecognizeTextRequest { [weak self] request, error in
-            guard let observations = request.results as? [VNRecognizedTextObservation],
-                  error == nil else { return }
+            let request = VNRecognizeTextRequest { request, error in
+                guard error == nil else { return }
 
-            let recognizedText = observations.compactMap { $0.topCandidates(1).first?.string }.joined(separator: "\n")
+                guard let observations = request.results as? [VNRecognizedTextObservation] else {
+                    return
+                }
 
-            if !recognizedText.isEmpty {
-                // 只更新数据库，不直接修改 UI（避免线程安全问题）
-                ClipboardStorage.shared.updateOCRText(item.id, text: recognizedText)
+                let recognizedText = observations.compactMap { $0.topCandidates(1).first?.string }.joined(separator: "\n")
 
-                // 触发 UI 重新加载（通过重新加载数据库）
-                DispatchQueue.main.async { [weak self] in
-                    guard self != nil else { return }
-                    let items = ClipboardStorage.shared.loadAll()
-                    AppState.shared.clipboardItems = items
+                if !recognizedText.isEmpty {
+                    ClipboardStorage.shared.updateOCRTextSync(item.id, text: recognizedText)
+
+                    DispatchQueue.global(qos: .utility).async {
+                        let items = ClipboardStorage.shared.loadAll()
+                        DispatchQueue.main.async {
+                            AppState.shared.clipboardItems = items
+                        }
+                    }
                 }
             }
+
+            request.recognitionLevel = .accurate
+            request.recognitionLanguages = ["zh-Hans", "zh-Hant", "en"]
+
+            let handler = VNImageRequestHandler(cgImage: cgImage, options: [:])
+            try? handler.perform([request])
         }
-
-        request.recognitionLevel = .accurate
-        request.recognitionLanguages = ["zh-Hans", "zh-Hant", "en"]
-
-        let handler = VNImageRequestHandler(cgImage: cgImage, options: [:])
-        try? handler.perform([request])
     }
 }

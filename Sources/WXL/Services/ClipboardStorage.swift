@@ -138,10 +138,17 @@ class ClipboardStorage {
 
     // MARK: - CRUD Operations
 
+    @discardableResult
     func save(_ item: ClipboardItem) -> Bool {
         let result = queue.sync { () -> Bool in
             do {
-                let hash = hashContent(item.content)
+                // 对于图片类型，使用图片数据的哈希；对于其他类型，使用文本内容的哈希
+                let hash: String
+                if item.contentType == .image, let imageData = item.imageData {
+                    hash = hashData(imageData)
+                } else {
+                    hash = hashContent(item.content)
+                }
 
                 // 检查是否已存在相同内容
                 let existingItem = itemsTable.filter(contentHashCol == hash)
@@ -206,7 +213,7 @@ class ClipboardStorage {
             }
         }
 
-        return true
+        return result
     }
 
     // 刷新项目的时间戳（用于选中时移到顶部）
@@ -224,6 +231,11 @@ class ClipboardStorage {
 
     private func hashContent(_ content: String) -> String {
         return content.sha256()
+    }
+
+    private func hashData(_ data: Data) -> String {
+        let hash = SHA256.hash(data: data)
+        return hash.compactMap { String(format: "%02x", $0) }.joined()
     }
 
     func loadAll() -> [ClipboardItem] {
@@ -284,6 +296,18 @@ class ClipboardStorage {
         }
     }
 
+    /// 同步更新 OCR 文本（确保在 loadAll 之前完成）
+    func updateOCRTextSync(_ itemId: UUID, text: String) {
+        queue.sync {
+            do {
+                let itemToUpdate = itemsTable.filter(idCol == itemId.uuidString)
+                try db?.run(itemToUpdate.update(ocrTextCol <- text))
+            } catch {
+                Logger.error("Update OCR sync error: \(error)", category: .database)
+            }
+        }
+    }
+
     // MARK: - Cleanup
 
     /// 清理过期项目（测试时可调用）
@@ -337,16 +361,21 @@ class ClipboardStorage {
     // MARK: - Search
 
     func search(query: String, sourceApp: String? = nil) -> [ClipboardItem] {
-        return queue.sync {
+        return queue.sync { () -> [ClipboardItem] in
             var items: [ClipboardItem] = []
             guard let database = db else { return items }
             do {
                 var searchQuery = itemsTable
 
                 if !query.isEmpty {
+                    // 使用 LOWER() 函数实现大小写不敏感和中文支持
+                    let lowerQuery = query.lowercased()
+                    let lowerContent = contentCol.lowercaseString
+                    let lowerOcrText = ocrTextCol.lowercaseString
+
                     searchQuery = searchQuery.filter(
-                        contentCol.like("%\(query)%") ||
-                        (ocrTextCol != nil && ocrTextCol.like("%\(query)%"))
+                        lowerContent.like("%\(lowerQuery)%") ||
+                        (ocrTextCol != nil && lowerOcrText.like("%\(lowerQuery)%"))
                     )
                 }
 

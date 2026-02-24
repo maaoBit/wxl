@@ -58,10 +58,14 @@ struct ClipboardItem: Identifiable, Codable {
 
     // 时间显示
     var timeAgo: String {
+        return ClipboardItem.timeAgoFormatter.localizedString(for: createdAt, relativeTo: Date())
+    }
+
+    private static let timeAgoFormatter: RelativeDateTimeFormatter = {
         let formatter = RelativeDateTimeFormatter()
         formatter.unitsStyle = .abbreviated
-        return formatter.localizedString(for: createdAt, relativeTo: Date())
-    }
+        return formatter
+    }()
 
     init(
         content: String,

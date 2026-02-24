@@ -6,6 +6,7 @@
 //
 
 import SwiftUI
+import Combine
 
 @main
 struct WXLApp: App {
@@ -24,34 +25,59 @@ struct WXLApp: App {
 class AppState: ObservableObject {
     static let shared = AppState()
 
-    @Published var clipboardItems: [ClipboardItem] = [] {
-        didSet {
-            // 确保数据变化时通知观察者
-            objectWillChange.send()
-        }
-    }
-    @Published var searchText: String = "" {
-        didSet {
-            // 确保数据变化时通知观察者
-            objectWillChange.send()
-        }
-    }
+    @Published var clipboardItems: [ClipboardItem] = []
+    @Published var searchText: String = ""
+    @Published var filteredItems: [ClipboardItem] = []
     @Published var selectedIndex: Int = 0
-
-    // 获取过滤后的项目列表
-    var filteredItems: [ClipboardItem] {
-        if searchText.isEmpty {
-            return clipboardItems
-        }
-        return clipboardItems.filter { item in
-            item.content.localizedCaseInsensitiveContains(searchText)
-        }
-    }
 
     // 获取当前选中的项目
     var selectedItem: ClipboardItem? {
         filteredItems.safe(at: selectedIndex)
     }
 
-    private init() {}
+    private var cancellables = Set<AnyCancellable>()
+    private let filterQueue = DispatchQueue(label: "com.wxl.search.filter", qos: .userInitiated)
+
+    private init() {
+        let debouncedSearch = $searchText
+            .removeDuplicates()
+            .debounce(for: .milliseconds(200), scheduler: DispatchQueue.main)
+
+        debouncedSearch
+            .combineLatest($clipboardItems)
+            .sink { [weak self] text, items in
+                self?.updateFilteredItems(searchText: text, items: items)
+            }
+            .store(in: &cancellables)
+
+        $clipboardItems
+            .sink { [weak self] items in
+                guard let self = self else { return }
+                if self.searchText.isEmpty {
+                    self.updateFilteredItems(searchText: "", items: items)
+                }
+            }
+            .store(in: &cancellables)
+    }
+
+    private func updateFilteredItems(searchText: String, items: [ClipboardItem]) {
+        filterQueue.async { [weak self] in
+            guard let self = self else { return }
+            let result: [ClipboardItem]
+            if searchText.isEmpty {
+                result = items
+            } else {
+                result = items.filter { item in
+                    item.content.localizedCaseInsensitiveContains(searchText) ||
+                    (item.ocrText?.localizedCaseInsensitiveContains(searchText) ?? false)
+                }
+            }
+            DispatchQueue.main.async {
+                self.filteredItems = result
+                if self.selectedIndex >= result.count {
+                    self.selectedIndex = max(0, result.count - 1)
+                }
+            }
+        }
+    }
 }
