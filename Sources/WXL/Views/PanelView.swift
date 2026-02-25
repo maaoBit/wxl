@@ -358,7 +358,7 @@ struct PanelView: View {
         // 通知监听器忽略即将发生的剪贴板变化
         ClipboardMonitor.shared.setIgnoreNextChange()
 
-        copyToClipboard(item.content)
+        copyToClipboard(item)
         dismissPanel()
         NSApplication.shared.hide(nil)
     }
@@ -383,9 +383,13 @@ struct PanelView: View {
         NSApplication.shared.keyWindow?.orderOut(nil)
     }
 
-    private func copyToClipboard(_ content: String) {
+    private func copyToClipboard(_ item: ClipboardItem) {
         NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(content, forType: .string)
+        if item.contentType == .image, let imageData = item.imageData {
+            NSPasteboard.general.setData(imageData, forType: .tiff)
+        } else {
+            NSPasteboard.general.setString(item.content, forType: .string)
+        }
     }
 
     private func simulatePaste() {

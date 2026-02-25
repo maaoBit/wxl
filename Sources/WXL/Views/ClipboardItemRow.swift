@@ -221,7 +221,11 @@ struct ClipboardItemRow: View {
 
         Button("复制内容") {
             NSPasteboard.general.clearContents()
-            NSPasteboard.general.setString(item.content, forType: .string)
+            if item.contentType == .image, let imageData = item.imageData {
+                NSPasteboard.general.setData(imageData, forType: .tiff)
+            } else {
+                NSPasteboard.general.setString(item.content, forType: .string)
+            }
         }
     }
 

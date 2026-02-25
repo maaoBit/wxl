@@ -357,7 +357,11 @@ class KeyboardHandlingPanel: NSPanel {
 
         // 复制到剪贴板
         NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(item.content, forType: .string)
+        if item.contentType == .image, let imageData = item.imageData {
+            NSPasteboard.general.setData(imageData, forType: .tiff)
+        } else {
+            NSPasteboard.general.setString(item.content, forType: .string)
+        }
 
         // 关闭面板
         orderOut(nil)
