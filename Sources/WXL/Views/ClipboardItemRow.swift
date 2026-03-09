@@ -56,15 +56,29 @@ struct ClipboardItemRow: View {
     }
 
     // MARK: - Type Icon
+    @ViewBuilder
     private var typeIcon: some View {
-        Image(systemName: item.contentType.icon)
-            .font(.system(size: 16, weight: .medium))
-            .foregroundColor(isSelected ? .accentColor : .secondary)
-            .frame(width: 24, height: 24)
-            .background(
-                Circle()
-                    .fill(isSelected ? Color.accentColor.opacity(0.2) : Color.secondary.opacity(0.1))
-            )
+        if item.contentType == .filePath, let fileURLs = item.fileURLs, let firstPath = fileURLs.first {
+            // 显示真实的文件图标
+            let icon = NSWorkspace.shared.icon(forFile: firstPath)
+            Image(nsImage: icon)
+                .resizable()
+                .aspectRatio(contentMode: .fit)
+                .frame(width: 20, height: 20)
+                .overlay(
+                    Circle()
+                        .stroke(isSelected ? Color.accentColor.opacity(0.3) : Color.clear, lineWidth: 1)
+                )
+        } else {
+            Image(systemName: item.contentType.icon)
+                .font(.system(size: 16, weight: .medium))
+                .foregroundColor(isSelected ? .accentColor : .secondary)
+                .frame(width: 24, height: 24)
+                .background(
+                    Circle()
+                        .fill(isSelected ? Color.accentColor.opacity(0.2) : Color.secondary.opacity(0.1))
+                )
+        }
     }
 
     // MARK: - Header
@@ -109,6 +123,39 @@ struct ClipboardItemRow: View {
                 .aspectRatio(contentMode: .fit)
                 .frame(maxHeight: 80)
                 .clipShape(RoundedRectangle(cornerRadius: 6))
+        } else if item.contentType == .filePath, let fileURLs = item.fileURLs, !fileURLs.isEmpty {
+            // 文件路径 - 显示完整路径
+            VStack(alignment: .leading, spacing: 4) {
+                // 文件名
+                Text(fileURLs.count == 1 ? (fileURLs[0] as NSString).lastPathComponent : "\(fileURLs.count) 个文件")
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundColor(isSelected ? .primary : .primary.opacity(0.9))
+                
+                // 完整路径
+                if fileURLs.count == 1 {
+                    Text(fileURLs[0])
+                        .font(.system(size: 11))
+                        .foregroundColor(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                } else {
+                    ForEach(Array(fileURLs.prefix(3).enumerated()), id: \.offset) { index, path in
+                        HStack(spacing: 2) {
+                            Text("•")
+                                .foregroundColor(.secondary.opacity(0.5))
+                            Text((path as NSString).lastPathComponent)
+                                .font(.system(size: 10))
+                                .foregroundColor(.secondary.opacity(0.8))
+                        }
+                        .lineLimit(1)
+                    }
+                    if fileURLs.count > 3 {
+                        Text("... 还有 \(fileURLs.count - 3) 个文件")
+                            .font(.system(size: 10))
+                            .foregroundColor(.secondary.opacity(0.6))
+                    }
+                }
+            }
         } else {
             // 文本内容
             Text(item.previewText)

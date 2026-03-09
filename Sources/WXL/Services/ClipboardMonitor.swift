@@ -73,9 +73,6 @@ class ClipboardMonitor: ObservableObject {
         // 因为复制文件时可能同时有文件URL和图标数据
         
         // ========== 1. 首先检测文件 ==========
-        let hasTextContent = pasteboard.string(forType: .string) != nil
-        Logger.debug("hasTextContent=\(hasTextContent)", category: .clipboard)
-        
         // 检查 NSFilenamesPboardType（多文件）
         if let fileURLsData = pasteboard.propertyList(forType: NSPasteboard.PasteboardType("NSFilenamesPboardType")) as? [String],
            !fileURLsData.isEmpty {
@@ -83,29 +80,8 @@ class ClipboardMonitor: ObservableObject {
             let existingFiles = fileURLsData.filter { FileManager.default.fileExists(atPath: $0) }
             Logger.debug("Existing files: \(existingFiles.count)/\(fileURLsData.count)", category: .clipboard)
             
-            if !existingFiles.isEmpty && !hasTextContent {
-                // 检查是否全部是图片文件
-                let imageFiles = existingFiles.filter { isImageFile($0) }
-                if imageFiles.count == existingFiles.count && !imageFiles.isEmpty {
-                    // 全部是图片文件，读取图片数据
-                    if let firstFile = imageFiles.first,
-                       let image = NSImage(contentsOf: URL(fileURLWithPath: firstFile)),
-                       let tiffData = image.tiffRepresentation {
-                        let item = ClipboardItem(
-                            content: "[Image]",
-                            contentType: .image,
-                            sourceApp: sourceApp?.localizedName,
-                            sourceAppBundle: sourceApp?.bundleIdentifier,
-                            imageData: tiffData
-                        )
-                        Logger.log("Calling onNewClip for image files", category: .clipboard)
-                        onNewClip?(item)
-                        performOCR(on: tiffData, item: item)
-                        return
-                    }
-                }
-                
-                // 非图片文件，保存为文件路径
+            if !existingFiles.isEmpty {
+                // 所有文件都保存为 filePath 类型，不区分图片
                 let fileNames = existingFiles.map { ($0 as NSString).lastPathComponent }
                 let previewText = fileNames.count == 1 ? fileNames[0] : "\(fileNames.count) 个文件"
                 let item = ClipboardItem(
@@ -115,13 +91,14 @@ class ClipboardMonitor: ObservableObject {
                     sourceAppBundle: sourceApp?.bundleIdentifier,
                     fileURLs: existingFiles
                 )
-                Logger.log("Calling onNewClip for file (NSFilenamesPboardType)", category: .clipboard)
+                Logger.log("Calling onNewClip for file (NSFilenamesPboardType): \(existingFiles)", category: .clipboard)
                 onNewClip?(item)
                 return
             }
         }
         
         // 检查单个 fileURL
+        let hasTextContent = pasteboard.string(forType: .string) != nil
         if let fileURLData = pasteboard.data(forType: .fileURL),
            let fileURLString = String(data: fileURLData, encoding: .utf8),
            !fileURLString.isEmpty {
@@ -129,39 +106,20 @@ class ClipboardMonitor: ObservableObject {
             
             if let url = URL(string: fileURLString),
                url.isFileURL,
-               FileManager.default.fileExists(atPath: url.path) {
-                Logger.debug("fileURL is valid file, hasTextContent=\(hasTextContent)", category: .clipboard)
-                
-                if !hasTextContent {
-                    // 检查是否是图片文件
-                    if isImageFile(url.path),
-                       let image = NSImage(contentsOf: url),
-                       let tiffData = image.tiffRepresentation {
-                        let item = ClipboardItem(
-                            content: "[Image]",
-                            contentType: .image,
-                            sourceApp: sourceApp?.localizedName,
-                            sourceAppBundle: sourceApp?.bundleIdentifier,
-                            imageData: tiffData
-                        )
-                        Logger.log("Calling onNewClip for image file", category: .clipboard)
-                        onNewClip?(item)
-                        performOCR(on: tiffData, item: item)
-                        return
-                    }
-                    
-                    // 非图片文件
-                    let item = ClipboardItem(
-                        content: url.lastPathComponent,
-                        contentType: .filePath,
-                        sourceApp: sourceApp?.localizedName,
-                        sourceAppBundle: sourceApp?.bundleIdentifier,
-                        fileURLs: [fileURLString]
-                    )
-                    Logger.log("Calling onNewClip for file (single fileURL)", category: .clipboard)
-                    onNewClip?(item)
-                    return
-                }
+               FileManager.default.fileExists(atPath: url.path),
+               !hasTextContent {
+                // 所有文件都保存为 filePath 类型
+                // 保存纯路径，而不是 file:// URL
+                let item = ClipboardItem(
+                    content: url.lastPathComponent,
+                    contentType: .filePath,
+                    sourceApp: sourceApp?.localizedName,
+                    sourceAppBundle: sourceApp?.bundleIdentifier,
+                    fileURLs: [url.path]  // 使用 url.path 而不是 fileURLString
+                )
+                Logger.log("Calling onNewClip for file (single fileURL): \(url.path)", category: .clipboard)
+                onNewClip?(item)
+                return
             }
         }
         

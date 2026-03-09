@@ -359,10 +359,15 @@ class KeyboardHandlingPanel: NSPanel {
         NSPasteboard.general.clearContents()
         if item.contentType == .image, let imageData = item.imageData {
             NSPasteboard.general.setData(imageData, forType: .tiff)
+        } else if item.contentType == .filePath, let fileURLs = item.fileURLs, !fileURLs.isEmpty {
+            // 写入文件 URL 到剪贴板
+            let urls = fileURLs.compactMap { URL(fileURLWithPath: $0) }
+            if !urls.isEmpty {
+                NSPasteboard.general.writeObjects(urls as [NSURL])
+            }
         } else {
             NSPasteboard.general.setString(item.content, forType: .string)
         }
-
         // 关闭面板
         orderOut(nil)
 

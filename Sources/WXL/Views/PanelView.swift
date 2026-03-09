@@ -385,17 +385,20 @@ struct PanelView: View {
 
     private func copyToClipboard(_ item: ClipboardItem) {
         NSPasteboard.general.clearContents()
+        Logger.debug("copyToClipboard: contentType=\(item.contentType), fileURLs=\(item.fileURLs ?? [])", category: .clipboard)
         
         if item.contentType == .image, let imageData = item.imageData {
             NSPasteboard.general.setData(imageData, forType: .tiff)
+            Logger.debug("Wrote image data to clipboard", category: .clipboard)
         } else if item.contentType == .filePath, let fileURLs = item.fileURLs, !fileURLs.isEmpty {
-            // 写入文件 URL 到剪贴板
             let urls = fileURLs.compactMap { URL(fileURLWithPath: $0) }
             if !urls.isEmpty {
-                NSPasteboard.general.writeObjects(urls as [NSURL])
+                let success = NSPasteboard.general.writeObjects(urls as [NSURL])
+                Logger.debug("writeObjects result: \(success)", category: .clipboard)
             }
         } else {
             NSPasteboard.general.setString(item.content, forType: .string)
+            Logger.debug("Wrote string to clipboard", category: .clipboard)
         }
     }
 

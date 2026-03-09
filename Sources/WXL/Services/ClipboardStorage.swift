@@ -479,9 +479,13 @@ class ClipboardStorage {
             var fileURLs: [String]? = nil
             if let fileURLsJSON = try row.get(fileURLsCol),
                let jsonData = fileURLsJSON.data(using: .utf8) {
-                fileURLs = try? JSONDecoder().decode([String].self, from: jsonData)
+                do {
+                    fileURLs = try JSONDecoder().decode([String].self, from: jsonData)
+                    Logger.debug("Loaded fileURLs: \(fileURLs ?? [])", category: .database)
+                } catch {
+                    Logger.error("Failed to decode fileURLs: \(error), JSON: \(fileURLsJSON)", category: .database)
+                }
             }
-
             guard let id = UUID(uuidString: idString),
                   let contentType = ContentType(rawValue: contentTypeRaw) else {
                 return nil

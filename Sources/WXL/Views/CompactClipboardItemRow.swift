@@ -18,22 +18,23 @@ struct CompactClipboardItemRow: View {
     var body: some View {
         HStack(spacing: 8) {
             // 类型图标（小）
-            Image(systemName: item.contentType.icon)
-                .font(.system(size: 11, weight: .medium))
-                .foregroundColor(isSelected ? .accentColor : .secondary.opacity(0.7))
-                .frame(width: 16, height: 16)
-                .background(
-                    Circle()
-                        .fill(isSelected ? Color.accentColor.opacity(0.15) : Color.clear)
-                )
+            typeIcon
 
-            // 内容预览（紧凑）
+            // 内容预览（紧凑） - 对于文件显示完整路径
             VStack(alignment: .leading, spacing: 2) {
-                Text(item.previewText)
-                    .font(.system(size: 11))
-                    .foregroundColor(isSelected ? .primary : .primary.opacity(0.85))
-                    .lineLimit(2)
-                    .multilineTextAlignment(.leading)
+                if item.contentType == .filePath, let fileURLs = item.fileURLs, !fileURLs.isEmpty {
+                    Text(fileURLs.count == 1 ? fileURLs[0] : "\(fileURLs.count) 个文件")
+                        .font(.system(size: 11))
+                        .foregroundColor(isSelected ? .primary : .primary.opacity(0.85))
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                } else {
+                    Text(item.previewText)
+                        .font(.system(size: 11))
+                        .foregroundColor(isSelected ? .primary : .primary.opacity(0.85))
+                        .lineLimit(2)
+                        .multilineTextAlignment(.leading)
+                }
 
                 HStack(spacing: 4) {
                     // 来源应用
@@ -81,5 +82,27 @@ struct CompactClipboardItemRow: View {
         .onTapGesture(count: 2) {
             onPaste()
         }
+    }
+    
+    // MARK: - Type Icon
+    @ViewBuilder
+    private var typeIcon: some View {
+        if item.contentType == .filePath, let fileURLs = item.fileURLs, let firstPath = fileURLs.first {
+        // 显示文件的真实图标
+        let icon = NSWorkspace.shared.icon(forFile: firstPath)
+        Image(nsImage: icon)
+            .resizable()
+            .aspectRatio(contentMode: .fit)
+            .frame(width: 14, height: 14)
+    } else {
+        Image(systemName: item.contentType.icon)
+            .font(.system(size: 11, weight: .medium))
+            .foregroundColor(isSelected ? .accentColor : .secondary.opacity(0.7))
+            .frame(width: 16, height: 16)
+            .background(
+                Circle()
+                    .fill(isSelected ? Color.accentColor.opacity(0.15) : Color.clear)
+            )
+    }
     }
 }
