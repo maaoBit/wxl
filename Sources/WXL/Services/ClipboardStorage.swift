@@ -26,6 +26,7 @@ class ClipboardStorage {
     private let expiresAtCol = Expression<Double?>("expiresAt")
     private let imageDataCol = Expression<Data?>("imageData")
     private let ocrTextCol = Expression<String?>("ocrText")
+    private let fileURLsCol = Expression<String?>("fileURLs")
     private let queue = DispatchQueue(label: "com.wxl.clipboardstorage", qos: .userInitiated)
 
     /// 用于测试的标识
@@ -81,6 +82,7 @@ class ClipboardStorage {
                 t.column(expiresAtCol)
                 t.column(imageDataCol)
                 t.column(ocrTextCol)
+                t.column(fileURLsCol)
             })
 
             // 检查并添加 contentHash 列（如果表已存在但缺少该列）
@@ -120,6 +122,27 @@ class ClipboardStorage {
                     Logger.error("Error adding contentHash column: \(error)", category: .database)
                 }
             }
+
+            // 检查并添加 fileURLs 列（如果表已存在但缺少该列）
+            var hasFileURLs = false
+            do {
+                let testQuery = itemsTable.select(fileURLsCol).limit(1)
+                _ = try db?.pluck(testQuery)
+                hasFileURLs = true
+            } catch {
+                hasFileURLs = false
+            }
+
+            if !hasFileURLs {
+                Logger.log("Adding fileURLs column to existing database...", category: .database)
+                do {
+                    try db?.run(itemsTable.addColumn(fileURLsCol, defaultValue: nil))
+                    Logger.log("fileURLs column added successfully", category: .database)
+                } catch {
+                    Logger.error("Error adding fileURLs column: \(error)", category: .database)
+                }
+            }
+
 
             // 创建索引以优化查询
             try db?.run(itemsTable.createIndex(contentHashCol, unique: false, ifNotExists: true))
@@ -176,6 +199,12 @@ class ClipboardStorage {
                     if let ocrText = item.ocrText {
                         updateBuilders.append(ocrTextCol <- ocrText)
                     }
+                    if let fileURLs = item.fileURLs, !fileURLs.isEmpty {
+                        if let jsonData = try? JSONEncoder().encode(fileURLs),
+                           let jsonString = String(data: jsonData, encoding: .utf8) {
+                            updateBuilders.append(fileURLsCol <- jsonString)
+                        }
+                    }
 
                     let updateItem = itemsTable.filter(idCol == existingId)
                     try db?.run(updateItem.update(updateBuilders))
@@ -183,6 +212,17 @@ class ClipboardStorage {
                 }
 
                 // 不存在，插入新记录
+                // 序列化 fileURLs 为 JSON
+                let fileURLsJSON: String? = {
+                    if let fileURLs = item.fileURLs, !fileURLs.isEmpty {
+                        if let jsonData = try? JSONEncoder().encode(fileURLs),
+                           let jsonString = String(data: jsonData, encoding: .utf8) {
+                            return jsonString
+                        }
+                    }
+                    return nil
+                }()
+                
                 let insert = itemsTable.insert(
                     idCol <- item.id.uuidString,
                     contentCol <- item.content,
@@ -194,7 +234,8 @@ class ClipboardStorage {
                     isPinnedCol <- item.isPinned,
                     expiresAtCol <- item.expiresAt?.timeIntervalSince1970,
                     imageDataCol <- item.imageData,
-                    ocrTextCol <- item.ocrText
+                    ocrTextCol <- item.ocrText,
+                    fileURLsCol <- fileURLsJSON
                 )
                 try db?.run(insert)
 
@@ -433,6 +474,13 @@ class ClipboardStorage {
             let expiresAtInterval = try row.get(expiresAtCol)
             let imageData = try row.get(imageDataCol)
             let ocrText = try row.get(ocrTextCol)
+            
+            // 加载 fileURLs
+            var fileURLs: [String]? = nil
+            if let fileURLsJSON = try row.get(fileURLsCol),
+               let jsonData = fileURLsJSON.data(using: .utf8) {
+                fileURLs = try? JSONDecoder().decode([String].self, from: jsonData)
+            }
 
             guard let id = UUID(uuidString: idString),
                   let contentType = ContentType(rawValue: contentTypeRaw) else {
@@ -449,7 +497,8 @@ class ClipboardStorage {
                 isPinned: isPinned,
                 expiresAt: expiresAtInterval.map { Date(timeIntervalSince1970: $0) },
                 imageData: imageData,
-                ocrText: ocrText
+                ocrText: ocrText,
+                fileURLs: fileURLs
             )
         } catch {
             Logger.error("Parse row error: \(error)", category: .database)

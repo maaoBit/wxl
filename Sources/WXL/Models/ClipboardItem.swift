@@ -46,6 +46,7 @@ struct ClipboardItem: Identifiable, Codable {
     // 图片数据（如果有）
     var imageData: Data?
     var ocrText: String? // OCR 识别的文字
+    var fileURLs: [String]? // 文件 URL 列表
 
     // 预览文本（截断显示）
     var previewText: String {
@@ -72,7 +73,8 @@ struct ClipboardItem: Identifiable, Codable {
         contentType: ContentType = .text,
         sourceApp: String? = nil,
         sourceAppBundle: String? = nil,
-        imageData: Data? = nil
+        imageData: Data? = nil,
+        fileURLs: [String]? = nil
     ) {
         self.id = UUID()
         self.content = content
@@ -92,6 +94,7 @@ struct ClipboardItem: Identifiable, Codable {
 
         self.imageData = imageData
         self.ocrText = nil
+        self.fileURLs = fileURLs
     }
 
     /// 从数据库加载时使用的初始化器
@@ -105,7 +108,8 @@ struct ClipboardItem: Identifiable, Codable {
         isPinned: Bool,
         expiresAt: Date?,
         imageData: Data?,
-        ocrText: String?
+        ocrText: String?,
+        fileURLs: [String]? = nil
     ) {
         self.id = id
         self.content = content
@@ -117,7 +121,8 @@ struct ClipboardItem: Identifiable, Codable {
         self.expiresAt = expiresAt
         self.imageData = imageData
         self.ocrText = ocrText
-    }
+        self.fileURLs = fileURLs
+}
 }
 
 // MARK: - Content Type Detection
