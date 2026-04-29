@@ -172,13 +172,6 @@ class ClipboardMonitor: ObservableObject {
         Logger.log("Calling onNewClip for text, contentType=\(contentType)", category: .clipboard)
         onNewClip?(item)
     }
-    
-    /// 判断文件是否是图片类型（基于扩展名）
-    private func isImageFile(_ path: String) -> Bool {
-        let imageExtensions = ["jpg", "jpeg", "png", "gif", "bmp", "tiff", "tif", "webp", "heic", "heif"]
-        let ext = (path as NSString).pathExtension.lowercased()
-        return imageExtensions.contains(ext)
-    }
 
     private func getActiveApplication() -> NSRunningApplication? {
         // 获取当前激活的应用

@@ -335,7 +335,11 @@ struct PanelView: View {
         case .url:
             return { openURL(item.content) }
         case .filePath:
-            return { revealInFinder(item.content) }
+            // 使用 fileURLs 中的完整路径，而不是 content（只是文件名）
+            if let filePath = item.fileURLs?.first {
+                return { revealInFinder(filePath) }
+            }
+            return nil
         case .email:
             return { openEmail(item.content) }
         case .phoneNumber:
@@ -387,9 +391,10 @@ struct PanelView: View {
         NSPasteboard.general.clearContents()
         Logger.debug("copyToClipboard: contentType=\(item.contentType), fileURLs=\(item.fileURLs ?? [])", category: .clipboard)
         
-        if item.contentType == .image, let imageData = item.imageData {
-            NSPasteboard.general.setData(imageData, forType: .tiff)
-            Logger.debug("Wrote image data to clipboard", category: .clipboard)
+        if item.contentType == .image, let imageData = item.imageData, let nsImage = NSImage(data: imageData) {
+            // 使用 NSImage 写入剪贴板，让系统自动处理格式
+            NSPasteboard.general.writeObjects([nsImage] as [NSPasteboardWriting])
+            Logger.debug("Wrote image to clipboard", category: .clipboard)
         } else if item.contentType == .filePath, let fileURLs = item.fileURLs, !fileURLs.isEmpty {
             let urls = fileURLs.compactMap { URL(fileURLWithPath: $0) }
             if !urls.isEmpty {

@@ -19,6 +19,7 @@ class MCPServer {
     private var listener: NWListener?
     private var config: MCPConfig = .load()
     private var connections: [NWConnection] = []
+    private let connectionsLock = NSLock()
 
     private var port: NWEndpoint.Port {
         return NWEndpoint.Port(rawValue: config.port) ?? 9527
@@ -67,8 +68,10 @@ class MCPServer {
     func stop() {
         listener?.cancel()
         listener = nil
+        connectionsLock.lock()
         connections.forEach { $0.cancel() }
         connections.removeAll()
+        connectionsLock.unlock()
     }
 
     func restart() {
@@ -82,10 +85,14 @@ class MCPServer {
         connection.stateUpdateHandler = { [weak self] state in
             switch state {
             case .ready:
+                self?.connectionsLock.lock()
                 self?.connections.append(connection)
+                self?.connectionsLock.unlock()
                 self?.receiveHTTPRequest(from: connection)
             case .failed:
+                self?.connectionsLock.lock()
                 self?.connections.removeAll { $0 === connection }
+                self?.connectionsLock.unlock()
             default:
                 break
             }

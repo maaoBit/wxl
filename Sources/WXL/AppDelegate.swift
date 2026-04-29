@@ -102,9 +102,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func showAbout() {
         let alert = NSAlert()
-        alert.messageText = "WXL 剪贴板管理器"
-        alert.informativeText = "一款优雅的 macOS 剪贴板历史管理工具\n\n版本：1.0\n快捷键：⌘⇧C"
-        alert.addButton(withTitle: "确定")
+        alert.messageText = "WXL"
+        alert.informativeText = "macOS 剪贴板历史管理器\n\(AppConstants.displayVersion)"
+        alert.addButton(withTitle: "好的")
         alert.runModal()
     }
 
@@ -115,19 +115,16 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             let hostingController = NSHostingController(rootView: settingsView)
 
             settingsWindow = NSWindow(
-                contentRect: NSRect(x: 0, y: 0, width: 500, height: 400),
+                contentRect: NSRect(x: 0, y: 0, width: 450, height: 400),
                 styleMask: [.titled, .closable],
                 backing: .buffered,
                 defer: false
             )
-
+            
             settingsWindow.title = "WXL 设置"
             settingsWindow.contentViewController = hostingController
             settingsWindow.center()
             settingsWindow.isReleasedWhenClosed = false
-
-            // 设置窗口为普通窗口（不是面板）
-            settingsWindow.level = .normal
         }
 
         // 显示并激活窗口
@@ -155,8 +152,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func handleNewClipboardItem(_ item: ClipboardItem) {
         Logger.debug("New clipboard item detected: \(item.previewText)", category: .clipboard)
-        let saved = clipboardStorage.save(item)
-        Logger.debug("Save result: \(saved)", category: .clipboard)
+        // save() 返回 true 表示新插入，false 表示已存在（更新时间戳）或出错
+        clipboardStorage.save(item)
         DispatchQueue.main.async { [weak self] in
             guard let self = self else { return }
             let items = self.clipboardStorage.loadAll()
@@ -357,8 +354,9 @@ class KeyboardHandlingPanel: NSPanel {
 
         // 复制到剪贴板
         NSPasteboard.general.clearContents()
-        if item.contentType == .image, let imageData = item.imageData {
-            NSPasteboard.general.setData(imageData, forType: .tiff)
+        if item.contentType == .image, let imageData = item.imageData, let nsImage = NSImage(data: imageData) {
+            // 使用 NSImage 写入剪贴板，让系统自动处理格式
+            NSPasteboard.general.writeObjects([nsImage] as [NSPasteboardWriting])
         } else if item.contentType == .filePath, let fileURLs = item.fileURLs, !fileURLs.isEmpty {
             // 写入文件 URL 到剪贴板
             let urls = fileURLs.compactMap { URL(fileURLWithPath: $0) }
@@ -381,17 +379,35 @@ class KeyboardHandlingPanel: NSPanel {
         switch item.contentType {
         case .url:
             // 在浏览器中打开
-            if let url = URL(string: item.content) {
+            var urlString = item.content.trimmingCharacters(in: .whitespacesAndNewlines)
+            // 如果没有 scheme，添加 https
+            if !urlString.hasPrefix("http://") && !urlString.hasPrefix("https://") {
+                urlString = "https://" + urlString
+            }
+            // 尝试直接创建 URL，如果失败则尝试编码
+            if let url = URL(string: urlString) ?? URL(string: urlString.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? "") {
                 NSWorkspace.shared.open(url)
             }
         case .filePath:
             // 在 Finder 中显示
-            let expandedPath = (item.content as NSString).expandingTildeInPath
-            let url = URL(fileURLWithPath: expandedPath)
-            if FileManager.default.fileExists(atPath: expandedPath) {
-                NSWorkspace.shared.activateFileViewerSelecting([url])
-            } else {
-                NSWorkspace.shared.open(url.deletingLastPathComponent())
+            // 优先使用 fileURLs（完整路径），而不是 content（只是文件名）
+            if let filePath = item.fileURLs?.first {
+                let url = URL(fileURLWithPath: filePath)
+                if FileManager.default.fileExists(atPath: filePath) {
+                    NSWorkspace.shared.activateFileViewerSelecting([url])
+                } else {
+                    // 文件不存在，打开父目录
+                    NSWorkspace.shared.open(url.deletingLastPathComponent())
+                }
+            } else if !item.content.isEmpty {
+                // 兼容旧数据：如果 fileURLs 为空，尝试从 content 构建路径
+                let expandedPath = (item.content as NSString).expandingTildeInPath
+                let url = URL(fileURLWithPath: expandedPath)
+                if FileManager.default.fileExists(atPath: expandedPath) {
+                    NSWorkspace.shared.activateFileViewerSelecting([url])
+                } else {
+                    NSWorkspace.shared.open(url.deletingLastPathComponent())
+                }
             }
         case .email:
             // 发送邮件

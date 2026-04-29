@@ -78,9 +78,9 @@ class OCRService {
         }
     }
 
-    /// 检测图片中是否包含特定文字
-    func containsText(_ searchText: String, in imageData: Data) -> Bool {
-        guard let text = recognizeText(in: imageData, completion: { _ in }) else {
+    /// 异步检测图片中是否包含特定文字
+    func containsTextAsync(_ searchText: String, in imageData: Data) async -> Bool {
+        guard let text = await recognizeTextAsync(in: imageData) else {
             return false
         }
         return text.localizedCaseInsensitiveContains(searchText)

@@ -32,7 +32,8 @@ class IntelligentActionService {
             cleanedURL = "https://" + cleanedURL
         }
 
-        guard let url = URL(string: cleanedURL) else { return }
+        // 尝试直接创建 URL，如果失败则尝试编码
+        guard let url = URL(string: cleanedURL) ?? URL(string: cleanedURL.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? "") else { return }
 
         if simulationMode {
             lastSimulatedAction = ("openURL", url.absoluteString)
