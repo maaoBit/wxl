@@ -26,8 +26,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // 初始化存储
         clipboardStorage = ClipboardStorage.shared
 
-        // 加载现有数据
-        AppState.shared.clipboardItems = clipboardStorage.loadAll()
+        // 加载现有数据（轻量级，不加载 imageData）
+        AppState.shared.clipboardItems = clipboardStorage.loadAllLight()
 
         // 初始化剪贴板监听
         clipboardMonitor = ClipboardMonitor.shared
@@ -152,18 +152,34 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func handleNewClipboardItem(_ item: ClipboardItem) {
         Logger.debug("New clipboard item detected: \(item.previewText)", category: .clipboard)
-        // save() 返回 true 表示新插入，false 表示已存在（更新时间戳）或出错
-        clipboardStorage.save(item)
-        DispatchQueue.main.async { [weak self] in
-            guard let self = self else { return }
-            let items = self.clipboardStorage.loadAll()
-            Logger.debug("Loaded \(items.count) items from database", category: .database)
-            AppState.shared.clipboardItems = items
-            Logger.debug("Updated AppState with \(items.count) items", category: .ui)
-            // 如果面板正在显示，重置选择到第一项
-            if self.panel.isVisible {
-                AppState.shared.selectedIndex = 0
-                Logger.debug("Panel is visible, reset selection to 0", category: .ui)
+        let isNew = clipboardStorage.save(item)
+        
+        if isNew {
+            // 新项目：直接在主线程插入，无需数据库查询
+            DispatchQueue.main.async { [weak self] in
+                guard let self = self else { return }
+                var items = AppState.shared.clipboardItems
+                let insertIndex = items.firstIndex(where: { !$0.isPinned }) ?? items.count
+                items.insert(item, at: insertIndex)
+                AppState.shared.clipboardItems = items
+                Logger.debug("Inserted new item at index \(insertIndex), total: \(items.count)", category: .ui)
+                
+                if self.panel.isVisible {
+                    AppState.shared.selectedIndex = 0
+                }
+            }
+        } else {
+            // 重复项目：在后台线程加载，避免阻塞主线程
+            DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+                let items = self?.clipboardStorage.loadAllLight() ?? []
+                DispatchQueue.main.async {
+                    AppState.shared.clipboardItems = items
+                    Logger.debug("Refreshed with loadAllLight for duplicate, total: \(items.count)", category: .ui)
+                    
+                    if self?.panel.isVisible == true {
+                        AppState.shared.selectedIndex = 0
+                    }
+                }
             }
         }
     }
@@ -342,10 +358,13 @@ class KeyboardHandlingPanel: NSPanel {
         // 刷新时间戳，将该项移到顶部（如果是置顶项则不移动）
         if !item.isPinned {
             ClipboardStorage.shared.refreshTimestamp(item.id)
-            // 重新加载列表
-            let items = ClipboardStorage.shared.loadAll()
-            AppState.shared.clipboardItems = items
-            // 该项现在应该在顶部了（置顶项之后）
+            var items = AppState.shared.clipboardItems
+            if let currentIndex = items.firstIndex(where: { $0.id == item.id }) {
+                let movedItem = items.remove(at: currentIndex)
+                let insertIndex = items.firstIndex(where: { !$0.isPinned }) ?? items.count
+                items.insert(movedItem, at: insertIndex)
+                AppState.shared.clipboardItems = items
+            }
             AppState.shared.selectedIndex = 0
         }
 
@@ -428,13 +447,12 @@ class KeyboardHandlingPanel: NSPanel {
     private func deleteSelected() {
         guard let item = AppState.shared.selectedItem else { return }
 
-        // 从存储中删除
         ClipboardStorage.shared.delete(item.id)
 
-        // 重新加载
-        AppState.shared.clipboardItems = ClipboardStorage.shared.loadAll()
+        var items = AppState.shared.clipboardItems
+        items.removeAll(where: { $0.id == item.id })
+        AppState.shared.clipboardItems = items
 
-        // 调整选择位置
         if AppState.shared.selectedIndex >= AppState.shared.filteredItems.count {
             AppState.shared.selectedIndex = max(0, AppState.shared.filteredItems.count - 1)
         }
@@ -443,24 +461,24 @@ class KeyboardHandlingPanel: NSPanel {
     private func togglePinSelected() {
         guard let item = AppState.shared.selectedItem else { return }
 
-        // 记录置顶状态
         let wasPinned = item.isPinned
-
-        // 切换置顶状态
         ClipboardStorage.shared.togglePin(item.id)
 
-        // 重新加载
-        let items = ClipboardStorage.shared.loadAll()
-        AppState.shared.clipboardItems = items
+        var items = AppState.shared.clipboardItems
+        if let index = items.firstIndex(where: { $0.id == item.id }) {
+            items[index].isPinned = !wasPinned
+            items.sort { a, b in
+                if a.isPinned != b.isPinned { return a.isPinned }
+                return a.createdAt > b.createdAt
+            }
+            AppState.shared.clipboardItems = items
 
-        // 更新选择焦点
-        if !wasPinned {
-            // 如果是置顶操作，该项会移动到顶部，选择焦点也移到顶部
-            AppState.shared.selectedIndex = 0
-        } else {
-            // 如果是取消置顶，找到该项的新位置
-            if let newIndex = items.firstIndex(where: { $0.id == item.id }) {
-                AppState.shared.selectedIndex = newIndex
+            if !wasPinned {
+                AppState.shared.selectedIndex = 0
+            } else {
+                if let newIndex = items.firstIndex(where: { $0.id == item.id }) {
+                    AppState.shared.selectedIndex = newIndex
+                }
             }
         }
     }

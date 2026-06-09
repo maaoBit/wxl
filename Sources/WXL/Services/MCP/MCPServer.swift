@@ -145,7 +145,7 @@ class MCPServer {
             let info = """
             {
                 "name": "WXL Clipboard MCP",
-                "version": "1.0.0",
+                "version": "1.3.0",
                 "protocol": "MCP over HTTP",
                 "endpoints": {
                     "mcp": "POST /mcp - JSON-RPC 2.0 endpoint",
@@ -215,7 +215,7 @@ class MCPServer {
             ],
             "serverInfo": [
                 "name": "WXL Clipboard MCP",
-                "version": "1.0.0"
+                "version": "1.3.0"
             ]
         ]
         sendJSONRPCResponse(connection: connection, result: result, id: id)
@@ -313,10 +313,10 @@ class MCPServer {
 
         switch uri {
         case "wxl://clipboard/history":
-            let items = ClipboardStorage.shared.loadAll()
+            let items = ClipboardStorage.shared.loadAllLight()
             content = encodeItemsAsJSON(items)
         case "wxl://clipboard/pinned":
-            let items = ClipboardStorage.shared.loadAll().filter { $0.isPinned }
+            let items = ClipboardStorage.shared.loadAllLight().filter { $0.isPinned }
             content = encodeItemsAsJSON(items)
         default:
             sendJSONRPCError(connection: connection, code: -32602, message: "Unknown resource", id: id)
@@ -337,7 +337,7 @@ class MCPServer {
         let contentType = args["contentType"] as? String
         let search = args["search"] as? String
 
-        var items = ClipboardStorage.shared.loadAll()
+        var items = ClipboardStorage.shared.loadAllLight()
 
         // Filter by content type
         if let type = contentType, let ct = ContentType(rawValue: type) {
@@ -364,7 +364,8 @@ class MCPServer {
         }
 
         let sourceApp = args["sourceApp"] as? String
-        let items = ClipboardStorage.shared.search(query: query, sourceApp: sourceApp)
+        let limit = args["limit"] as? Int ?? 100
+        let items = ClipboardStorage.shared.searchLight(query: query, sourceApp: sourceApp, limit: limit)
 
         return ["text": encodeItemsAsJSON(items) ?? "[]"]
     }
@@ -377,7 +378,7 @@ class MCPServer {
         let title = args["title"] as? String ?? "Clipboard Notes"
 
         // Get items by IDs
-        let allItems = ClipboardStorage.shared.loadAll()
+        let allItems = ClipboardStorage.shared.loadAllLight()
         let selectedItems = itemIds.compactMap { id -> ClipboardItem? in
             guard let uuid = UUID(uuidString: id) else { return nil }
             return allItems.first { $0.id == uuid }

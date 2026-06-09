@@ -10,6 +10,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - Initial open source release
 
+## [1.3.0] - 2026-06-09
+
+### Performance
+- **FTS5 Full-Text Search**: Added SQLite FTS5 index for content and OCR text, replacing slow LIKE queries
+- **Lightweight Data Loading**: New `loadAllLight()` and `searchLight()` methods that skip imageData BLOBs
+- **Incremental Updates**: Clipboard operations (paste, delete, pin) now update arrays directly instead of full database reloads
+- **Pagination**: Panel loads 50 items initially with infinite scroll, search results capped at 200
+- **Debounce Optimization**: Increased search debounce from 200ms to 300ms
+
+### Fixed
+- Search freezing when clipboard history has many items
+- Main thread blocking when updating duplicate clipboard items
+- FTS5 query parameter binding issues
+
 ## [1.0.0] - 2024-02-23
 
 ### Added
@@ -77,4 +91,5 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 | Version | Date | Description |
 |---------|------|-------------|
+| 1.3.0 | 2026-06-09 | Performance optimization: FTS5 search, lightweight loading, pagination |
 | 1.0.0 | 2024-02-23 | Initial release with core features |

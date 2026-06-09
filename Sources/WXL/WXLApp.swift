@@ -41,7 +41,7 @@ class AppState: ObservableObject {
     private init() {
         let debouncedSearch = $searchText
             .removeDuplicates()
-            .debounce(for: .milliseconds(200), scheduler: DispatchQueue.main)
+            .debounce(for: .milliseconds(300), scheduler: DispatchQueue.main)
 
         debouncedSearch
             .combineLatest($clipboardItems)
@@ -67,10 +67,7 @@ class AppState: ObservableObject {
             if searchText.isEmpty {
                 result = items
             } else {
-                result = items.filter { item in
-                    item.content.localizedCaseInsensitiveContains(searchText) ||
-                    (item.ocrText?.localizedCaseInsensitiveContains(searchText) ?? false)
-                }
+                result = ClipboardStorage.shared.searchLight(query: searchText)
             }
             DispatchQueue.main.async {
                 self.filteredItems = result

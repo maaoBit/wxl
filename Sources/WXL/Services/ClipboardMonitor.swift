@@ -198,7 +198,7 @@ class ClipboardMonitor: ObservableObject {
                     ClipboardStorage.shared.updateOCRTextSync(item.id, text: recognizedText)
 
                     DispatchQueue.global(qos: .utility).async {
-                        let items = ClipboardStorage.shared.loadAll()
+                        let items = ClipboardStorage.shared.loadAllLight()
                         DispatchQueue.main.async {
                             AppState.shared.clipboardItems = items
                         }

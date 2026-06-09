@@ -29,6 +29,9 @@ class ClipboardStorage {
     private let fileURLsCol = Expression<String?>("fileURLs")
     private let queue = DispatchQueue(label: "com.wxl.clipboardstorage", qos: .userInitiated)
 
+    /// FTS5 全文搜索是否可用
+    private var ftsAvailable = false
+
     /// 用于测试的标识
     private let isTestMode: Bool
 
@@ -148,6 +151,26 @@ class ClipboardStorage {
             try db?.run(itemsTable.createIndex(contentHashCol, unique: false, ifNotExists: true))
             try db?.run(itemsTable.createIndex(createdAtCol, ifNotExists: true))
 
+            // 创建 FTS5 虚拟表用于全文搜索
+            do {
+                try db?.run("""
+                    CREATE VIRTUAL TABLE IF NOT EXISTS clipboard_fts USING fts5(
+                        id UNINDEXED, content, ocrText
+                    )
+                """)
+                // 从主表重建 FTS 索引
+                try db?.run("DELETE FROM clipboard_fts")
+                try db?.run("""
+                    INSERT INTO clipboard_fts(rowid, id, content, ocrText)
+                    SELECT rowid, id, content, COALESCE(ocrText, '') FROM clipboard_items
+                """)
+                ftsAvailable = true
+                Logger.log("FTS5 virtual table created and indexed", category: .database)
+            } catch {
+                ftsAvailable = false
+                Logger.error("FTS5 setup error (will fallback to LIKE): \(error)", category: .database)
+            }
+
             // 仅在生产模式下执行自动清理
             if !isTestMode {
                 cleanExpiredItems()
@@ -208,6 +231,7 @@ class ClipboardStorage {
 
                     let updateItem = itemsTable.filter(idCol == existingId)
                     try db?.run(updateItem.update(updateBuilders))
+                    self.syncFTS5(id: existingId, content: item.content, ocrText: item.ocrText)
                     return false
                 }
 
@@ -238,6 +262,7 @@ class ClipboardStorage {
                     fileURLsCol <- fileURLsJSON
                 )
                 try db?.run(insert)
+                self.syncFTS5(id: item.id.uuidString, content: item.content, ocrText: item.ocrText)
 
                 return true
 
@@ -297,11 +322,35 @@ class ClipboardStorage {
         }
     }
 
+    /// 轻量级加载所有项目，排除 imageData 列以提升性能
+    func loadAllLight() -> [ClipboardItem] {
+        return queue.sync {
+            var items: [ClipboardItem] = []
+            guard let database = db else { return items }
+            do {
+                let query = itemsTable
+                    .select(idCol, contentCol, contentHashCol, contentTypeCol, sourceAppCol,
+                            sourceAppBundleCol, createdAtCol, isPinnedCol, expiresAtCol,
+                            ocrTextCol, fileURLsCol)
+                    .order(isPinnedCol.desc, createdAtCol.desc)
+                for row in try database.prepare(query) {
+                    if let item = parseRowLight(row) {
+                        items.append(item)
+                    }
+                }
+            } catch {
+                Logger.error("Load all light error: \(error)", category: .database)
+            }
+            return items
+        }
+    }
+
     func delete(_ itemId: UUID) {
         queue.sync {
             do {
                 let itemToDelete = itemsTable.filter(idCol == itemId.uuidString)
                 try db?.run(itemToDelete.delete())
+                self.removeFTS5(id: itemId.uuidString)
             } catch {
                 Logger.error("Delete error: \(error)", category: .database)
             }
@@ -358,7 +407,12 @@ class ClipboardStorage {
                 let now = Date().timeIntervalSince1970
                 let expiredItems = itemsTable
                     .filter(expiresAtCol != nil && expiresAtCol < now && isPinnedCol == false)
+                // 先获取要删除的 ID，用于同步 FTS5
+                let idsToDelete = try db?.prepare(expiredItems.select(idCol)).compactMap { try? $0.get(idCol) } ?? []
                 try db?.run(expiredItems.delete())
+                for id in idsToDelete {
+                    self.removeFTS5(id: id)
+                }
             } catch {
                 Logger.error("Clean expired error: \(error)", category: .database)
             }
@@ -389,6 +443,7 @@ class ClipboardStorage {
                     let idsToDelete = try database.prepare(itemsToDelete).compactMap { try? $0.get(idCol) }
                     for id in idsToDelete {
                         try database.run(itemsTable.filter(idCol == id).delete())
+                        self.removeFTS5(id: id)
                     }
 
                     Logger.log("清理了 \(deleteCount) 条历史记录（当前限制: \(limit)）", category: .database)
@@ -401,7 +456,7 @@ class ClipboardStorage {
 
     // MARK: - Search
 
-    func search(query: String, sourceApp: String? = nil) -> [ClipboardItem] {
+    func search(query: String, sourceApp: String? = nil, limit: Int = 100) -> [ClipboardItem] {
         return queue.sync { () -> [ClipboardItem] in
             var items: [ClipboardItem] = []
             guard let database = db else { return items }
@@ -409,7 +464,6 @@ class ClipboardStorage {
                 var searchQuery = itemsTable
 
                 if !query.isEmpty {
-                    // 使用 LOWER() 函数实现大小写不敏感和中文支持
                     let lowerQuery = query.lowercased()
                     let lowerContent = contentCol.lowercaseString
                     let lowerOcrText = ocrTextCol.lowercaseString
@@ -424,7 +478,7 @@ class ClipboardStorage {
                     searchQuery = searchQuery.filter(sourceAppCol == app)
                 }
 
-                searchQuery = searchQuery.order(isPinnedCol.desc, createdAtCol.desc)
+                searchQuery = searchQuery.order(isPinnedCol.desc, createdAtCol.desc).limit(limit)
 
                 for row in try database.prepare(searchQuery) {
                     if let item = parseRow(row) {
@@ -433,6 +487,85 @@ class ClipboardStorage {
                 }
             } catch {
                 Logger.error("Search error: \(error)", category: .database)
+            }
+            return items
+        }
+    }
+
+    /// 轻量级搜索，优先使用 FTS5 全文搜索，不加载 imageData
+    func searchLight(query: String, sourceApp: String? = nil, limit: Int = 100) -> [ClipboardItem] {
+        return queue.sync { () -> [ClipboardItem] in
+            var items: [ClipboardItem] = []
+            guard let database = db else { return items }
+            do {
+                if ftsAvailable && !query.isEmpty {
+                    let ftsQuery = prepareFTSQuery(query)
+                    var matchingIds: [String] = []
+
+                    let ftsStmt = try database.prepare("""
+                        SELECT id FROM clipboard_fts
+                        WHERE clipboard_fts MATCH ?
+                        ORDER BY rank
+                        LIMIT ?
+                    """)
+                    for row in ftsStmt.bind(ftsQuery, limit) {
+                        if let id = row[0] as? String {
+                            matchingIds.append(id)
+                        }
+                    }
+
+                    if !matchingIds.isEmpty {
+                        var searchQuery = itemsTable
+                            .select(idCol, contentCol, contentHashCol, contentTypeCol, sourceAppCol,
+                                    sourceAppBundleCol, createdAtCol, isPinnedCol, expiresAtCol,
+                                    ocrTextCol, fileURLsCol)
+                            .filter(matchingIds.contains(idCol))
+
+                        if let app = sourceApp {
+                            searchQuery = searchQuery.filter(sourceAppCol == app)
+                        }
+
+                        searchQuery = searchQuery.order(isPinnedCol.desc, createdAtCol.desc)
+
+                        for row in try database.prepare(searchQuery) {
+                            if let item = parseRowLight(row) {
+                                items.append(item)
+                            }
+                        }
+                        return items
+                    }
+                }
+
+                // Fallback: LIKE search
+                var searchQuery = itemsTable
+                    .select(idCol, contentCol, contentHashCol, contentTypeCol, sourceAppCol,
+                            sourceAppBundleCol, createdAtCol, isPinnedCol, expiresAtCol,
+                            ocrTextCol, fileURLsCol)
+
+                if !query.isEmpty {
+                    let lowerQuery = query.lowercased()
+                    let lowerContent = contentCol.lowercaseString
+                    let lowerOcrText = ocrTextCol.lowercaseString
+
+                    searchQuery = searchQuery.filter(
+                        lowerContent.like("%\(lowerQuery)%") ||
+                        (ocrTextCol != nil && lowerOcrText.like("%\(lowerQuery)%"))
+                    )
+                }
+
+                if let app = sourceApp {
+                    searchQuery = searchQuery.filter(sourceAppCol == app)
+                }
+
+                searchQuery = searchQuery.order(isPinnedCol.desc, createdAtCol.desc).limit(limit)
+
+                for row in try database.prepare(searchQuery) {
+                    if let item = parseRowLight(row) {
+                        items.append(item)
+                    }
+                }
+            } catch {
+                Logger.error("Search light error: \(error)", category: .database)
             }
             return items
         }
@@ -461,6 +594,37 @@ class ClipboardStorage {
     }
 
     // MARK: - Helpers
+
+    private func syncFTS5(id: String, content: String, ocrText: String?) {
+        guard ftsAvailable, let database = db else { return }
+        do {
+            try database.run("DELETE FROM clipboard_fts WHERE id = ?", id)
+            try database.run(
+                "INSERT INTO clipboard_fts(id, content, ocrText) VALUES(?, ?, ?)",
+                id, content, ocrText ?? ""
+            )
+        } catch {
+            Logger.error("FTS5 sync error: \(error)", category: .database)
+        }
+    }
+
+    private func removeFTS5(id: String) {
+        guard ftsAvailable, let database = db else { return }
+        do {
+            try database.run("DELETE FROM clipboard_fts WHERE id = ?", id)
+        } catch {
+            Logger.error("FTS5 remove error: \(error)", category: .database)
+        }
+    }
+
+    /// 将用户查询转换为 FTS5 查询语法，添加前缀匹配
+    private func prepareFTSQuery(_ query: String) -> String {
+        let escaped = query
+            .replacingOccurrences(of: "\"", with: "\"\"")
+            .replacingOccurrences(of: "'", with: "''")
+        let terms = escaped.split(separator: " ").map { "\($0)*" }
+        return terms.joined(separator: " ")
+    }
 
     private func parseRow(_ row: Row) -> ClipboardItem? {
         do {
@@ -506,6 +670,49 @@ class ClipboardStorage {
             )
         } catch {
             Logger.error("Parse row error: \(error)", category: .database)
+            return nil
+        }
+    }
+
+    /// 轻量级行解析，跳过 imageData（用于列表展示和搜索结果）
+    private func parseRowLight(_ row: Row) -> ClipboardItem? {
+        do {
+            let idString = try row.get(idCol)
+            let content = try row.get(contentCol)
+            let contentTypeRaw = try row.get(contentTypeCol)
+            let sourceApp = try row.get(sourceAppCol)
+            let sourceAppBundle = try row.get(sourceAppBundleCol)
+            let createdAtInterval = try row.get(createdAtCol)
+            let isPinned = try row.get(isPinnedCol)
+            let expiresAtInterval = try row.get(expiresAtCol)
+            let ocrText = try row.get(ocrTextCol)
+
+            var fileURLs: [String]? = nil
+            if let fileURLsJSON = try row.get(fileURLsCol),
+               let jsonData = fileURLsJSON.data(using: .utf8) {
+                fileURLs = try? JSONDecoder().decode([String].self, from: jsonData)
+            }
+
+            guard let id = UUID(uuidString: idString),
+                  let contentType = ContentType(rawValue: contentTypeRaw) else {
+                return nil
+            }
+
+            return ClipboardItem(
+                id: id,
+                content: content,
+                contentType: contentType,
+                sourceApp: sourceApp,
+                sourceAppBundle: sourceAppBundle,
+                createdAt: Date(timeIntervalSince1970: createdAtInterval),
+                isPinned: isPinned,
+                expiresAt: expiresAtInterval.map { Date(timeIntervalSince1970: $0) },
+                imageData: nil,
+                ocrText: ocrText,
+                fileURLs: fileURLs
+            )
+        } catch {
+            Logger.error("Parse row light error: \(error)", category: .database)
             return nil
         }
     }

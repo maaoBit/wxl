@@ -12,6 +12,17 @@ struct PanelView: View {
     @StateObject private var appState = AppState.shared
     @FocusState private var isSearchFocused: Bool
 
+    // MARK: - Pagination State
+    @State private var loadedCount = 50
+    @State private var isLoadingMore = false
+    private let pageSize = 50
+    private let searchMaxCount = 200
+
+    private var displayedItems: [ClipboardItem] {
+        let limit = appState.searchText.isEmpty ? loadedCount : searchMaxCount
+        return Array(appState.filteredItems.prefix(limit))
+    }
+
     var body: some View {
         LiquidGlassContainer {
             VStack(spacing: 0) {
@@ -41,6 +52,9 @@ struct PanelView: View {
             if newIndex >= appState.filteredItems.count && !appState.filteredItems.isEmpty {
                 appState.selectedIndex = appState.filteredItems.count - 1
             }
+        }
+        .onChange(of: appState.searchText) { _, _ in
+            loadedCount = pageSize
         }
     }
 
@@ -97,7 +111,7 @@ struct PanelView: View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(spacing: 4) {
-                    ForEach(Array(appState.filteredItems.enumerated()), id: \.element.id) { index, item in
+                    ForEach(Array(displayedItems.enumerated()), id: \.element.id) { index, item in
                         CompactClipboardItemRow(
                             item: item,
                             isSelected: index == appState.selectedIndex,
@@ -116,6 +130,13 @@ struct PanelView: View {
                             }
                         )
                         .id(item.id)
+                    }
+
+                    if displayedItems.count < appState.filteredItems.count {
+                        ProgressView()
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 8)
+                            .task { await loadMoreIfNeeded() }
                     }
                 }
                 .onChange(of: appState.selectedIndex) { _, newIndex in
@@ -329,6 +350,17 @@ struct PanelView: View {
     }
 
     // MARK: - Actions
+
+    @MainActor
+    private func loadMoreIfNeeded() async {
+        guard !isLoadingMore else { return }
+        guard loadedCount < appState.filteredItems.count else { return }
+
+        isLoadingMore = true
+        try? await Task.sleep(nanoseconds: 150_000_000)
+        loadedCount = min(loadedCount + pageSize, appState.filteredItems.count)
+        isLoadingMore = false
+    }
 
     private func getAction(for item: ClipboardItem) -> (() -> Void)? {
         switch item.contentType {
