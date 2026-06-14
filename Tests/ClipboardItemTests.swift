@@ -143,12 +143,12 @@ final class ClipboardItemTests: XCTestCase {
     }
 
     func testDetectContentType_Code_Constant() {
-        let content = "let myConstant = \"hello\""
+        let content = "let config = { timeout: 30 }"
         XCTAssertEqual(ClipboardItem.detectContentType(content), .code)
     }
 
     func testDetectContentType_Code_Import() {
-        let content = "import Foundation"
+        let content = "import UIKit\nclass ViewController { }"
         XCTAssertEqual(ClipboardItem.detectContentType(content), .code)
     }
 
@@ -163,7 +163,7 @@ final class ClipboardItemTests: XCTestCase {
     }
 
     func testDetectContentType_Code_Python_Class() {
-        let content = "class MyClass:"
+        let content = "class MyClass:\n    def __init__(self):\n        pass"
         XCTAssertEqual(ClipboardItem.detectContentType(content), .code)
     }
 
@@ -180,6 +180,23 @@ final class ClipboardItemTests: XCTestCase {
     func testDetectContentType_Code_Braces() {
         let content = "{ \"key\": \"value\" }"
         XCTAssertEqual(ClipboardItem.detectContentType(content), .code)
+    }
+
+    // MARK: Code Detection - False Positive Prevention
+
+    func testDetectContentType_EnglishWithLet_NotCode() {
+        let content = "Let me know when you are free"
+        XCTAssertEqual(ClipboardItem.detectContentType(content), .text)
+    }
+
+    func testDetectContentType_EnglishWithClass_NotCode() {
+        let content = "They offer first class service to everyone"
+        XCTAssertEqual(ClipboardItem.detectContentType(content), .text)
+    }
+
+    func testDetectContentType_EnglishWithImport_NotCode() {
+        let content = "You can import data from a CSV file"
+        XCTAssertEqual(ClipboardItem.detectContentType(content), .text)
     }
 
     // MARK: Text Detection (Default)

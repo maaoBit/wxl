@@ -373,9 +373,15 @@ class KeyboardHandlingPanel: NSPanel {
 
         // 复制到剪贴板
         NSPasteboard.general.clearContents()
-        if item.contentType == .image, let imageData = item.imageData, let nsImage = NSImage(data: imageData) {
-            // 使用 NSImage 写入剪贴板，让系统自动处理格式
-            NSPasteboard.general.writeObjects([nsImage] as [NSPasteboardWriting])
+        if item.contentType == .image {
+            // 轻量级加载的列表中 imageData 可能为 nil，按需从数据库加载
+            let imageData = item.imageData ?? ClipboardStorage.shared.loadImageData(item.id)
+            if let imageData = imageData, let nsImage = NSImage(data: imageData) {
+                // 使用 NSImage 写入剪贴板，让系统自动处理格式
+                NSPasteboard.general.writeObjects([nsImage] as [NSPasteboardWriting])
+            } else {
+                NSPasteboard.general.setString(item.content, forType: .string)
+            }
         } else if item.contentType == .filePath, let fileURLs = item.fileURLs, !fileURLs.isEmpty {
             // 写入文件 URL 到剪贴板
             let urls = fileURLs.compactMap { URL(fileURLWithPath: $0) }

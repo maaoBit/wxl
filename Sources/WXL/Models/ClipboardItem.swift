@@ -157,11 +157,20 @@ extension ClipboardItem {
         }
 
         // Code (简单检测：包含常见编程符号)
-        let codeIndicators = ["{", "}", "=>", "->", "func ", "var ", "let ", "import ", "#include", "def ", "class "]
-        for indicator in codeIndicators {
+        // 强指示符：自然语言中几乎不出现，单独命中即可判定为代码
+        let strongIndicators = ["func ", "def ", "var ", "#include"]
+        for indicator in strongIndicators {
             if content.contains(indicator) {
                 return .code
             }
+        }
+
+        // 弱指示符：自然语言中也可能出现（如 "let me know"、"first class"、
+        // "import data"、花括号等），需 2 个及以上不同指示符同时出现才判定为代码，降低误判率
+        let weakIndicators = ["let ", "import ", "class ", "{", "}", "=>", "->"]
+        let weakMatchCount = weakIndicators.filter { content.contains($0) }.count
+        if weakMatchCount >= 2 {
+            return .code
         }
 
         return .text

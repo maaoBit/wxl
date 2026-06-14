@@ -10,6 +10,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - Initial open source release
 
+## [1.3.1] - 2026-06-14
+
+### Fixed
+- **Image paste from history broken**: Pasting images loaded from the database (after app restart or dedup refresh) inserted the literal text "[Image]" instead of the actual image. Clipboard list items are loaded without `imageData` for performance; the paste paths now load image data on demand when it is missing.
+- **FTS5 search failures on special characters**: Searching for queries containing FTS5 special characters (`:`, `(`, `-`, `*`, etc.) threw syntax errors and silently returned empty results. Query terms are now properly double-quote escaped, and `searchLight` falls back to LIKE search when the FTS5 query fails.
+- **Content type misclassified as code**: Everyday English such as "let me know", "first class", and "import data" was incorrectly detected as code. Detection now uses a two-tier heuristic: strong indicators (`func`/`def`/`var`/`#include`) alone trigger code; weaker indicators (`let`/`import`/`class`/braces) require two or more.
+- **Paste blocked main thread**: `pasteSelected` reloaded the entire history (including image BLOBs) on the main thread just to reorder. It now reorders in memory, consistent with the keyboard paste path.
+
 ## [1.3.0] - 2026-06-09
 
 ### Performance

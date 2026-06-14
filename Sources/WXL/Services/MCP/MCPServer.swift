@@ -145,7 +145,7 @@ class MCPServer {
             let info = """
             {
                 "name": "WXL Clipboard MCP",
-                "version": "1.3.0",
+                "version": "1.3.1",
                 "protocol": "MCP over HTTP",
                 "endpoints": {
                     "mcp": "POST /mcp - JSON-RPC 2.0 endpoint",
@@ -215,7 +215,7 @@ class MCPServer {
             ],
             "serverInfo": [
                 "name": "WXL Clipboard MCP",
-                "version": "1.3.0"
+                "version": "1.3.1"
             ]
         ]
         sendJSONRPCResponse(connection: connection, result: result, id: id)

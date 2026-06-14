@@ -345,6 +345,27 @@ class ClipboardStorage {
         }
     }
 
+    /// 加载单个项目的 imageData（用于轻量级列表中按需获取图片数据）
+    /// - Parameter itemId: 项目 ID
+    /// - Returns: 图片数据，如果项目不存在或无图片则返回 nil
+    func loadImageData(_ itemId: UUID) -> Data? {
+        return queue.sync {
+            guard let database = db else { return nil }
+            do {
+                let query = itemsTable
+                    .select(imageDataCol)
+                    .filter(idCol == itemId.uuidString)
+                    .limit(1)
+                if let row = try database.pluck(query) {
+                    return try row.get(imageDataCol)
+                }
+            } catch {
+                Logger.error("Load image data error: \(error)", category: .database)
+            }
+            return nil
+        }
+    }
+
     func delete(_ itemId: UUID) {
         queue.sync {
             do {
@@ -493,82 +514,104 @@ class ClipboardStorage {
     }
 
     /// 轻量级搜索，优先使用 FTS5 全文搜索，不加载 imageData
+    /// - 当 FTS5 不可用或查询出错时，自动回退到 LIKE 搜索
     func searchLight(query: String, sourceApp: String? = nil, limit: Int = 100) -> [ClipboardItem] {
         return queue.sync { () -> [ClipboardItem] in
+            guard let database = db else { return [] }
+
+            // 优先尝试 FTS5 全文搜索
+            if ftsAvailable && !query.isEmpty {
+                if let ftsItems = searchByFTS(database: database, query: query, sourceApp: sourceApp) {
+                    return ftsItems
+                }
+                // FTS 查询失败（如特殊字符导致语法错误）则回退到 LIKE
+            }
+
+            // LIKE 回退搜索（含 query 为空时的全量加载）
+            return searchByLIKE(database: database, query: query, sourceApp: sourceApp, limit: limit)
+        }
+    }
+
+    /// FTS5 全文搜索。返回 nil 表示查询出错（需回退到 LIKE）；返回数组表示查询成功（可能为空）
+    private func searchByFTS(database: Connection, query: String, sourceApp: String?) -> [ClipboardItem]? {
+        do {
+            let ftsQuery = prepareFTSQuery(query)
+            var matchingIds: [String] = []
+
+            // 注意：不在 FTS 层加 LIMIT，否则配合 sourceApp 过滤会漏掉结果
+            let ftsStmt = try database.prepare("""
+                SELECT id FROM clipboard_fts
+                WHERE clipboard_fts MATCH ?
+                ORDER BY rank
+            """)
+            for row in ftsStmt.bind(ftsQuery) {
+                if let id = row[0] as? String {
+                    matchingIds.append(id)
+                }
+            }
+
+            guard !matchingIds.isEmpty else { return [] }
+
+            var searchQuery = itemsTable
+                .select(idCol, contentCol, contentHashCol, contentTypeCol, sourceAppCol,
+                        sourceAppBundleCol, createdAtCol, isPinnedCol, expiresAtCol,
+                        ocrTextCol, fileURLsCol)
+                .filter(matchingIds.contains(idCol))
+
+            if let app = sourceApp {
+                searchQuery = searchQuery.filter(sourceAppCol == app)
+            }
+
+            searchQuery = searchQuery.order(isPinnedCol.desc, createdAtCol.desc)
+
             var items: [ClipboardItem] = []
-            guard let database = db else { return items }
-            do {
-                if ftsAvailable && !query.isEmpty {
-                    let ftsQuery = prepareFTSQuery(query)
-                    var matchingIds: [String] = []
-
-                    let ftsStmt = try database.prepare("""
-                        SELECT id FROM clipboard_fts
-                        WHERE clipboard_fts MATCH ?
-                        ORDER BY rank
-                        LIMIT ?
-                    """)
-                    for row in ftsStmt.bind(ftsQuery, limit) {
-                        if let id = row[0] as? String {
-                            matchingIds.append(id)
-                        }
-                    }
-
-                    if !matchingIds.isEmpty {
-                        var searchQuery = itemsTable
-                            .select(idCol, contentCol, contentHashCol, contentTypeCol, sourceAppCol,
-                                    sourceAppBundleCol, createdAtCol, isPinnedCol, expiresAtCol,
-                                    ocrTextCol, fileURLsCol)
-                            .filter(matchingIds.contains(idCol))
-
-                        if let app = sourceApp {
-                            searchQuery = searchQuery.filter(sourceAppCol == app)
-                        }
-
-                        searchQuery = searchQuery.order(isPinnedCol.desc, createdAtCol.desc)
-
-                        for row in try database.prepare(searchQuery) {
-                            if let item = parseRowLight(row) {
-                                items.append(item)
-                            }
-                        }
-                        return items
-                    }
+            for row in try database.prepare(searchQuery) {
+                if let item = parseRowLight(row) {
+                    items.append(item)
                 }
-
-                // Fallback: LIKE search
-                var searchQuery = itemsTable
-                    .select(idCol, contentCol, contentHashCol, contentTypeCol, sourceAppCol,
-                            sourceAppBundleCol, createdAtCol, isPinnedCol, expiresAtCol,
-                            ocrTextCol, fileURLsCol)
-
-                if !query.isEmpty {
-                    let lowerQuery = query.lowercased()
-                    let lowerContent = contentCol.lowercaseString
-                    let lowerOcrText = ocrTextCol.lowercaseString
-
-                    searchQuery = searchQuery.filter(
-                        lowerContent.like("%\(lowerQuery)%") ||
-                        (ocrTextCol != nil && lowerOcrText.like("%\(lowerQuery)%"))
-                    )
-                }
-
-                if let app = sourceApp {
-                    searchQuery = searchQuery.filter(sourceAppCol == app)
-                }
-
-                searchQuery = searchQuery.order(isPinnedCol.desc, createdAtCol.desc).limit(limit)
-
-                for row in try database.prepare(searchQuery) {
-                    if let item = parseRowLight(row) {
-                        items.append(item)
-                    }
-                }
-            } catch {
-                Logger.error("Search light error: \(error)", category: .database)
             }
             return items
+        } catch {
+            Logger.error("FTS5 search failed, falling back to LIKE: \(error)", category: .database)
+            return nil
         }
+    }
+
+    /// LIKE 搜索（回退方案）
+    private func searchByLIKE(database: Connection, query: String, sourceApp: String?, limit: Int) -> [ClipboardItem] {
+        var items: [ClipboardItem] = []
+        do {
+            var searchQuery = itemsTable
+                .select(idCol, contentCol, contentHashCol, contentTypeCol, sourceAppCol,
+                        sourceAppBundleCol, createdAtCol, isPinnedCol, expiresAtCol,
+                        ocrTextCol, fileURLsCol)
+
+            if !query.isEmpty {
+                let lowerQuery = query.lowercased()
+                let lowerContent = contentCol.lowercaseString
+                let lowerOcrText = ocrTextCol.lowercaseString
+
+                searchQuery = searchQuery.filter(
+                    lowerContent.like("%\(lowerQuery)%") ||
+                    (ocrTextCol != nil && lowerOcrText.like("%\(lowerQuery)%"))
+                )
+            }
+
+            if let app = sourceApp {
+                searchQuery = searchQuery.filter(sourceAppCol == app)
+            }
+
+            searchQuery = searchQuery.order(isPinnedCol.desc, createdAtCol.desc).limit(limit)
+
+            for row in try database.prepare(searchQuery) {
+                if let item = parseRowLight(row) {
+                    items.append(item)
+                }
+            }
+        } catch {
+            Logger.error("Search light (LIKE) error: \(error)", category: .database)
+        }
+        return items
     }
 
     func getUniqueSourceApps() -> [String] {
@@ -618,11 +661,12 @@ class ClipboardStorage {
     }
 
     /// 将用户查询转换为 FTS5 查询语法，添加前缀匹配
+    /// 每个 term 用双引号包裹（内部双引号加倍转义），以安全处理特殊字符（如 : ( ) - *）
     private func prepareFTSQuery(_ query: String) -> String {
-        let escaped = query
-            .replacingOccurrences(of: "\"", with: "\"\"")
-            .replacingOccurrences(of: "'", with: "''")
-        let terms = escaped.split(separator: " ").map { "\($0)*" }
+        let terms = query.split(separator: " ").map { term -> String in
+            let escaped = term.replacingOccurrences(of: "\"", with: "\"\"")
+            return "\"\(escaped)\"*"
+        }
         return terms.joined(separator: " ")
     }
 

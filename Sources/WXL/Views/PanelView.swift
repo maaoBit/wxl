@@ -386,8 +386,14 @@ struct PanelView: View {
 
         if !item.isPinned {
             ClipboardStorage.shared.refreshTimestamp(item.id)
-            let items = ClipboardStorage.shared.loadAll()
-            appState.clipboardItems = items
+            // 内存内重排序，避免在主线程加载全部数据（含 imageData）导致卡顿
+            var items = appState.clipboardItems
+            if let currentIndex = items.firstIndex(where: { $0.id == item.id }) {
+                let movedItem = items.remove(at: currentIndex)
+                let insertIndex = items.firstIndex(where: { !$0.isPinned }) ?? items.count
+                items.insert(movedItem, at: insertIndex)
+                appState.clipboardItems = items
+            }
             appState.selectedIndex = 0
         }
 
@@ -422,11 +428,17 @@ struct PanelView: View {
     private func copyToClipboard(_ item: ClipboardItem) {
         NSPasteboard.general.clearContents()
         Logger.debug("copyToClipboard: contentType=\(item.contentType), fileURLs=\(item.fileURLs ?? [])", category: .clipboard)
-        
-        if item.contentType == .image, let imageData = item.imageData, let nsImage = NSImage(data: imageData) {
-            // 使用 NSImage 写入剪贴板，让系统自动处理格式
-            NSPasteboard.general.writeObjects([nsImage] as [NSPasteboardWriting])
-            Logger.debug("Wrote image to clipboard", category: .clipboard)
+
+        if item.contentType == .image {
+            // 轻量级加载的列表中 imageData 可能为 nil，按需从数据库加载
+            let imageData = item.imageData ?? ClipboardStorage.shared.loadImageData(item.id)
+            if let imageData = imageData, let nsImage = NSImage(data: imageData) {
+                NSPasteboard.general.writeObjects([nsImage] as [NSPasteboardWriting])
+                Logger.debug("Wrote image to clipboard", category: .clipboard)
+            } else {
+                NSPasteboard.general.setString(item.content, forType: .string)
+                Logger.debug("Image data unavailable, wrote placeholder", category: .clipboard)
+            }
         } else if item.contentType == .filePath, let fileURLs = item.fileURLs, !fileURLs.isEmpty {
             let urls = fileURLs.compactMap { URL(fileURLWithPath: $0) }
             if !urls.isEmpty {
