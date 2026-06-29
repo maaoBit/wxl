@@ -10,6 +10,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - Initial open source release
 
+## [1.3.3] - 2026-06-29
+
+### Added
+- **Automatic update detection and installation**: The app now checks for new versions on GitHub Releases on launch (configurable in Settings → 通用 → 启动时自动检查更新, enabled by default) and via a manual "检查更新" button in Settings → 关于. When a newer version is found, the menu bar icon shows a badge and the About page offers a one-click "下载并安装" flow that downloads the architecture-matched DMG (arm64/x86_64), mounts it, replaces the running `.app` in place, clears quarantine attributes (to avoid Gatekeeper blocking the ad-hoc signed build), and relaunches the app. Version comparison is based on `CFBundleShortVersionString` (the installed version) rather than the compile-time constant.
+
+### Fixed
+- **AppConstants version desync**: The About page reads a hardcoded `AppConstants.version`; it now displays the actual installed version from `Info.plist` so the version string stays in sync with releases.
+
 ## [1.3.2] - 2026-06-29
 
 ### Fixed
@@ -104,6 +112,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 | Version | Date | Description |
 |---------|------|-------------|
+| 1.3.3 | 2026-06-29 | Auto-update: version detection and one-click install |
 | 1.3.2 | 2026-06-29 | Bug fix: image preview in detail panel |
 | 1.3.0 | 2026-06-09 | Performance optimization: FTS5 search, lightweight loading, pagination |
 | 1.0.0 | 2024-02-23 | Initial release with core features |

@@ -13,39 +13,58 @@ struct SettingsView: View {
     @AppStorage("expiryHours") private var expiryHours: Int = 24
     @AppStorage("maxHistoryCount") private var maxHistoryCount: Int = 500
     @AppStorage("launchAtLogin") private var launchAtLogin: Bool = false
-    
+    @ObservedObject private var updateChecker = UpdateChecker.shared
+    @State private var selectedTab: SettingsTab = .general
+
     var body: some View {
-        TabView {
+        TabView(selection: $selectedTab) {
             GeneralSettingsView(
                 expiryHours: $expiryHours,
                 maxHistoryCount: $maxHistoryCount,
                 launchAtLogin: $launchAtLogin
             )
+            .tag(SettingsTab.general)
             .tabItem {
                 Label("通用", systemImage: "gearshape")
             }
-            
+
             AppearanceSettingsView()
+                .tag(SettingsTab.appearance)
                 .tabItem {
                     Label("外观", systemImage: "paintbrush")
                 }
-            
+
             ShortcutsSettingsView()
+                .tag(SettingsTab.shortcuts)
                 .tabItem {
                     Label("快捷键", systemImage: "keyboard")
                 }
-            
+
             MCPSettingsView()
+                .tag(SettingsTab.mcp)
                 .tabItem {
                     Label("MCP", systemImage: "network")
                 }
-            
+
             AboutView()
+                .tag(SettingsTab.about)
                 .tabItem {
                     Label("关于", systemImage: "info.circle")
                 }
         }
         .frame(width: 450, height: 400)
+        .onAppear {
+            // 若 UpdateChecker 请求切换到某页（如发现新版本后引导到“关于”）
+            if let requested = updateChecker.consumeSettingsTabRequest() {
+                selectedTab = requested
+            }
+        }
+        .onChange(of: updateChecker.requestedSettingsTab) { _, newValue in
+            if let tab = newValue {
+                selectedTab = tab
+                _ = updateChecker.consumeSettingsTabRequest()
+            }
+        }
     }
 }
 
@@ -54,6 +73,7 @@ struct GeneralSettingsView: View {
     @Binding var expiryHours: Int
     @Binding var maxHistoryCount: Int
     @Binding var launchAtLogin: Bool
+    @AppStorage("checkForUpdatesOnLaunch") private var checkForUpdatesOnLaunch: Bool = true
     
     let expiryOptions = [6, 12, 24, 48, 72, 168] // hours
     let countOptions = [100, 200, 500, 1000, 2000]
@@ -85,6 +105,8 @@ struct GeneralSettingsView: View {
                     .onChange(of: launchAtLogin) { _, newValue in
                         setLaunchAtLogin(newValue)
                     }
+
+                Toggle("启动时自动检查更新", isOn: $checkForUpdatesOnLaunch)
             }
         }
         .formStyle(.grouped)
@@ -211,6 +233,8 @@ struct ShortcutsSettingsView: View {
 
 // MARK: - About View
 struct AboutView: View {
+    @ObservedObject private var updateChecker = UpdateChecker.shared
+
     var body: some View {
         VStack(spacing: 16) {
             Image(systemName: "clipboard.on.clipboard")
@@ -222,20 +246,23 @@ struct AboutView: View {
                         endPoint: .bottomTrailing
                     )
                 )
-            
+
             Text("WXL")
                 .font(.system(size: 24, weight: .bold))
-            
+
             Text("macOS 剪贴板历史管理器")
                 .font(.system(size: 14))
                 .foregroundColor(.secondary)
-            
-            Text(AppConstants.displayVersion)
+
+            Text(updateChecker.currentVersion.isEmpty ? AppConstants.displayVersion : "v\(updateChecker.currentVersion)")
                 .font(.system(size: 12))
                 .foregroundColor(.secondary)
-            
+
+            // 更新检查区块
+            updateSection
+
             Spacer()
-            
+
             Text("使用 Liquid Glass UI 打造的优雅剪贴板管理工具")
                 .font(.system(size: 11))
                 .foregroundColor(.secondary)
@@ -243,6 +270,94 @@ struct AboutView: View {
         }
         .padding()
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    // MARK: - Update Section
+
+    @ViewBuilder
+    private var updateSection: some View {
+        switch updateChecker.status {
+        case .idle:
+            Button(action: { updateChecker.checkForUpdates() }) {
+                Label("检查更新", systemImage: "arrow.triangle.2.circlepath")
+                    .font(.system(size: 12))
+            }
+            .buttonStyle(.bordered)
+
+        case .checking:
+            HStack(spacing: 6) {
+                ProgressView()
+                    .controlSize(.small)
+                Text("正在检查...")
+                    .font(.system(size: 12))
+                    .foregroundColor(.secondary)
+            }
+
+        case .upToDate:
+            VStack(spacing: 8) {
+                Label("已是最新版本", systemImage: "checkmark.circle.fill")
+                    .font(.system(size: 12))
+                    .foregroundColor(.green)
+                Button(action: { updateChecker.checkForUpdates() }) {
+                    Text("再次检查")
+                        .font(.system(size: 11))
+                }
+                .buttonStyle(.borderless)
+            }
+
+        case .updateAvailable:
+            VStack(spacing: 8) {
+                Label("发现新版本 v\(updateChecker.latestVersion ?? "")", systemImage: "sparkles")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(.orange)
+
+                Button(action: { updateChecker.downloadAndInstall() }) {
+                    Label("下载并安装", systemImage: "arrow.down.circle")
+                        .font(.system(size: 12))
+                }
+                .buttonStyle(.borderedProminent)
+
+                Button(action: { updateChecker.reset() }) {
+                    Text("忽略")
+                        .font(.system(size: 11))
+                        .foregroundColor(.secondary)
+                }
+                .buttonStyle(.borderless)
+            }
+
+        case .downloading:
+            VStack(spacing: 8) {
+                HStack(spacing: 8) {
+                    ProgressView(value: updateChecker.progress)
+                        .progressViewStyle(.linear)
+                        .frame(width: 160)
+                    Text("\(Int(updateChecker.progress * 100))%")
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundColor(.secondary)
+                }
+                Text("正在下载 v\(updateChecker.latestVersion ?? "")...")
+                    .font(.system(size: 11))
+                    .foregroundColor(.secondary)
+            }
+
+        case .readyToInstall:
+            // 安装提示已由弹窗处理，这里显示一个占位
+            Label("准备安装...", systemImage: "gear")
+                .font(.system(size: 12))
+                .foregroundColor(.secondary)
+
+        case .failed:
+            VStack(spacing: 8) {
+                Label(updateChecker.errorMessage ?? "检查更新失败", systemImage: "xmark.circle.fill")
+                    .font(.system(size: 11))
+                    .foregroundColor(.red)
+                Button(action: { updateChecker.checkForUpdates() }) {
+                    Text("重试")
+                        .font(.system(size: 11))
+                }
+                .buttonStyle(.bordered)
+            }
+        }
     }
 }
 

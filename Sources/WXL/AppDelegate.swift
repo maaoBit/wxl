@@ -50,6 +50,34 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         if mcpConfig.enabled {
             MCPServer.shared.start()
         }
+
+        // 启动时自动检查更新（后台异步，不阻塞 UI）
+        if UserDefaults.standard.object(forKey: "checkForUpdatesOnLaunch") as? Bool ?? true {
+            DispatchQueue.global(qos: .utility).async {
+                UpdateChecker.shared.checkForUpdates(isAutomatic: true)
+            }
+        }
+
+        // 监听“发现新版本”通知，在菜单栏图标上加红点 badge 提示
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(showUpdateBadge(_:)),
+            name: .updateAvailableBadge,
+            object: nil
+        )
+    }
+
+    /// 发现新版本时，在菜单栏图标上叠加红点提示
+    @objc private func showUpdateBadge(_ notification: Notification) {
+        updateStatusItemBadge(showsBadge: true)
+    }
+
+    /// 切换菜单栏图标的红点 badge（用带圆点的 SF Symbol 表示有更新）
+    private func updateStatusItemBadge(showsBadge: Bool) {
+        guard let button = statusItem?.button else { return }
+        let symbolName = showsBadge ? "doc.on.doc.fill.badge.plus" : "doc.on.doc"
+        button.image = NSImage(systemSymbolName: symbolName, accessibilityDescription: "WXL 剪贴板")
+        button.image?.isTemplate = true
     }
 
     private func setupPanel() {
@@ -80,6 +108,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         // 关于
         menu.addItem(NSMenuItem(title: "关于 WXL", action: #selector(showAbout), keyEquivalent: ""))
+
+        // 检查更新（复用打开关于页）
+        let updateItem = NSMenuItem(title: "检查更新...", action: #selector(openAboutSettings), keyEquivalent: "")
+        menu.addItem(updateItem)
 
         // 分隔线
         menu.addItem(NSMenuItem.separator())
@@ -130,6 +162,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // 显示并激活窗口
         settingsWindow.makeKeyAndOrderFront(nil)
         NSApplication.shared.activate(ignoringOtherApps: true)
+    }
+
+    @objc private func openAboutSettings() {
+        // 打开设置窗口，并请求切换到“关于”页；用户已查看更新，清除菜单栏红点
+        UpdateChecker.shared.requestedSettingsTab = .about
+        updateStatusItemBadge(showsBadge: false)
+        showSettings()
     }
 
     @objc private func quitApp() {
