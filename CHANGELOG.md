@@ -10,6 +10,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - Initial open source release
 
+## [1.3.2] - 2026-06-29
+
+### Fixed
+- **Image preview broken in detail panel**: When selecting an image in the history list, the right-hand detail panel displayed the literal text "[Image]" instead of the image itself. The clipboard list is loaded without `imageData` (via `loadAllLight()`) for performance, so `selectedItem.imageData` was `nil` and the detail view fell back to the placeholder text. The detail preview now loads the image data on demand from the database (same pattern already used by `copyToClipboard`).
+
 ## [1.3.1] - 2026-06-14
 
 ### Fixed
@@ -99,5 +104,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 | Version | Date | Description |
 |---------|------|-------------|
+| 1.3.2 | 2026-06-29 | Bug fix: image preview in detail panel |
 | 1.3.0 | 2026-06-09 | Performance optimization: FTS5 search, lightweight loading, pagination |
 | 1.0.0 | 2024-02-23 | Initial release with core features |

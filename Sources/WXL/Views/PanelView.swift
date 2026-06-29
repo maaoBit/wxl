@@ -198,7 +198,9 @@ struct PanelView: View {
 
                 // 完整内容
                 ScrollView {
-                    if item.contentType == .image, let imageData = item.imageData, let nsImage = NSImage(data: imageData) {
+                    // 轻量级加载的列表中 imageData 可能为 nil，按需从数据库加载
+                    let imageData = item.imageData ?? ClipboardStorage.shared.loadImageData(item.id)
+                    if item.contentType == .image, let imageData = imageData, let nsImage = NSImage(data: imageData) {
                         VStack(alignment: .leading, spacing: 12) {
                             // 图片
                             Image(nsImage: nsImage)
