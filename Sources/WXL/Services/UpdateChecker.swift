@@ -16,7 +16,6 @@ enum SettingsTab: Hashable {
     case general
     case appearance
     case shortcuts
-    case mcp
     case about
 }
 

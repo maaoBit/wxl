@@ -24,7 +24,6 @@
 - **置顶收藏** — 重要内容置顶保存，永不自动清理
 - **自动清理** — 可配置保留时间与最大条数
 - **来源追踪** — 记录每条内容的来源应用
-- **MCP 集成** — 内置 MCP 服务器，支持 Claude Code 等 AI 工具访问剪贴板历史
 
 ## 快捷键
 
@@ -48,24 +47,6 @@
 git clone https://github.com/maaoBit/wxl.git
 cd wxl
 swift build -c release
-```
-
-## MCP 集成
-
-WXL 内置 MCP 服务器，允许 AI 工具访问剪贴板历史。应用启动后自动运行在 `http://127.0.0.1:9527`。
-
-在 Claude Code 中配置：
-
-```bash
-claude mcp add --transport http wxl http://127.0.0.1:9527/mcp
-```
-
-可用工具：`get_clipboard_history` · `search_clipboard` · `generate_note`
-
-测试连接：
-
-```bash
-curl http://127.0.0.1:9527/health
 ```
 
 ## 系统要求

@@ -45,12 +45,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // 注册全局快捷键
         setupHotKeys()
 
-        // 启动 MCP 服务器
-        let mcpConfig = MCPConfig.load()
-        if mcpConfig.enabled {
-            MCPServer.shared.start()
-        }
-
         // 启动时自动检查更新（后台异步，不阻塞 UI）
         if UserDefaults.standard.object(forKey: "checkForUpdatesOnLaunch") as? Bool ?? true {
             DispatchQueue.global(qos: .utility).async {

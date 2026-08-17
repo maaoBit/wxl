@@ -40,12 +40,6 @@ struct SettingsView: View {
                     Label("快捷键", systemImage: "keyboard")
                 }
 
-            MCPSettingsView()
-                .tag(SettingsTab.mcp)
-                .tabItem {
-                    Label("MCP", systemImage: "network")
-                }
-
             AboutView()
                 .tag(SettingsTab.about)
                 .tabItem {
@@ -358,115 +352,5 @@ struct AboutView: View {
                 .buttonStyle(.bordered)
             }
         }
-    }
-}
-
-// MARK: - MCP Settings
-struct MCPSettingsView: View {
-    @AppStorage("mcpEnabled") private var mcpEnabled: Bool = true
-    @AppStorage("mcpPort") private var mcpPort: Int = 9527
-    @State private var serverStatus: String = "未知"
-    
-    let portOptions = [9527, 9528, 9529, 9530]
-    
-    var body: some View {
-        Form {
-            Section("服务器设置") {
-                Toggle("启用 MCP 服务器", isOn: $mcpEnabled)
-                    .onChange(of: mcpEnabled) { _, newValue in
-                        if newValue {
-                            MCPServer.shared.start()
-                        } else {
-                            MCPServer.shared.stop()
-                        }
-                        updateServerStatus()
-                    }
-                
-                LabeledContent("端口") {
-                    Picker("", selection: $mcpPort) {
-                        ForEach(portOptions, id: \.self) { port in
-                            Text("\(port)").tag(port)
-                        }
-                    }
-                    .frame(width: 100)
-                    .onChange(of: mcpPort) { _, _ in
-                        MCPServer.shared.restart()
-                        updateServerStatus()
-                    }
-                }
-                
-                LabeledContent("状态") {
-                    HStack(spacing: 6) {
-                        Circle()
-                            .fill(serverStatus == "运行中" ? Color.green : Color.red)
-                            .frame(width: 8, height: 8)
-                        Text(serverStatus)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-            }
-            
-            Section("Claude Code 配置") {
-                VStack(alignment: .leading, spacing: 12) {
-                    Text("在 Claude Code 中运行以下命令添加 MCP 服务器：")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    
-                    Text("claude mcp add --transport http wxl http://127.0.0.1:\(mcpPort)/mcp")
-                        .font(.system(.body, design: .monospaced))
-                        .padding(8)
-                        .background(Color.secondary.opacity(0.1))
-                        .clipShape(RoundedRectangle(cornerRadius: 4))
-                        .textSelection(.enabled)
-                }
-            }
-            
-            Section("可用工具") {
-                VStack(alignment: .leading, spacing: 8) {
-                    toolRow("get_clipboard_history", "获取剪贴板历史记录")
-                    toolRow("search_clipboard", "搜索剪贴板内容")
-                    toolRow("generate_note", "从剪贴板项目生成笔记")
-                }
-            }
-        }
-        .formStyle(.grouped)
-        .padding()
-        .onAppear {
-            updateServerStatus()
-        }
-    }
-    
-    private func toolRow(_ name: String, _ description: String) -> some View {
-        HStack {
-            Text(name)
-                .font(.system(.body, design: .monospaced))
-            Spacer()
-            Text(description)
-                .foregroundStyle(.secondary)
-                .font(.caption)
-        }
-    }
-    
-    private func updateServerStatus() {
-        guard mcpEnabled else {
-            serverStatus = "已禁用"
-            return
-        }
-        
-        let healthURL = URL(string: "http://127.0.0.1:\(mcpPort)/health")!
-        var request = URLRequest(url: healthURL)
-        request.timeoutInterval = 2.0
-        request.httpMethod = "GET"
-        
-        URLSession.shared.dataTask(with: request) { _, response, error in
-            DispatchQueue.main.async {
-                if let httpResponse = response as? HTTPURLResponse,
-                       httpResponse.statusCode == 200 {
-                    serverStatus = "运行中"
-                } else {
-                    serverStatus = "已停止"
-                }
-            }
-        }.resume()
     }
 }
