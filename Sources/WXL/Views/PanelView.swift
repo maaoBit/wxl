@@ -238,12 +238,15 @@ struct PanelView: View {
                             }
                         }
                     } else {
-                        Text(item.content)
-                            .font(.system(size: 12))
-                            .monospaced()
-                            .foregroundColor(.primary.opacity(0.9))
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .textSelection(.enabled)
+                        VStack(alignment: .leading, spacing: 4) {
+                            ForEach(item.detailLines.indices, id: \.self) { index in
+                                Text(item.detailLines[index])
+                                    .font(.system(size: 12, design: .monospaced))
+                                    .foregroundColor(.primary.opacity(0.9))
+                                    .textSelection(.enabled)
+                            }
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
                     }
                 }
                 .scrollIndicators(.visible)
@@ -268,8 +271,8 @@ struct PanelView: View {
 
                     Spacer()
 
-                    // 字符统计
-                    Text("\(item.content.count) 字符")
+                    // 字符统计（文件条目显示文件数）
+                    Text(item.footerStatText)
                         .font(.system(size: 10))
                         .foregroundColor(.secondary.opacity(0.6))
                 }
@@ -428,29 +431,14 @@ struct PanelView: View {
     }
 
     private func copyToClipboard(_ item: ClipboardItem) {
-        NSPasteboard.general.clearContents()
         Logger.debug("copyToClipboard: contentType=\(item.contentType), fileURLs=\(item.fileURLs ?? [])", category: .clipboard)
 
-        if item.contentType == .image {
-            // 轻量级加载的列表中 imageData 可能为 nil，按需从数据库加载
-            let imageData = item.imageData ?? ClipboardStorage.shared.loadImageData(item.id)
-            if let imageData = imageData, let nsImage = NSImage(data: imageData) {
-                NSPasteboard.general.writeObjects([nsImage] as [NSPasteboardWriting])
-                Logger.debug("Wrote image to clipboard", category: .clipboard)
-            } else {
-                NSPasteboard.general.setString(item.content, forType: .string)
-                Logger.debug("Image data unavailable, wrote placeholder", category: .clipboard)
-            }
-        } else if item.contentType == .filePath, let fileURLs = item.fileURLs, !fileURLs.isEmpty {
-            let urls = fileURLs.compactMap { URL(fileURLWithPath: $0) }
-            if !urls.isEmpty {
-                let success = NSPasteboard.general.writeObjects(urls as [NSURL])
-                Logger.debug("writeObjects result: \(success)", category: .clipboard)
-            }
-        } else {
-            NSPasteboard.general.setString(item.content, forType: .string)
-            Logger.debug("Wrote string to clipboard", category: .clipboard)
-        }
+        // 轻量级加载的列表中 imageData 可能为 nil，按需从数据库加载
+        let imageData: Data? = item.contentType == .image
+            ? (item.imageData ?? ClipboardStorage.shared.loadImageData(item.id))
+            : nil
+
+        ClipboardWriter.write(item, to: NSPasteboard.general, imageData: imageData)
     }
 
     private func simulatePaste() {
