@@ -99,3 +99,6 @@ _bmad-output/
 *.icns
 *.iconset
 icon-square.png
+
+# ZCode/AI session data
+.omo/

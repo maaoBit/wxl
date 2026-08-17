@@ -7,8 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.4.0] - 2026-08-17
+
 ### Added
 - Initial open source release
+
+### Fixed
+- **File items show full paths in detail panel**: Copying a file/folder in Finder displayed only the filename (or "N 个文件") in the right-hand detail panel. The detail view now renders the complete absolute paths from `fileURLs` (one per line, selectable); the left list stays compact with filenames. The footer stat shows file count instead of character count for file items.
+
+### Removed
+- **MCP server**: The built-in HTTP MCP server (port 9527), its settings tab, and related documentation were removed. Manual copy/paste (which is already auto-captured into history) covers the human↔AI content transfer use case; the one-way read-only MCP integration saw no real-world use and added maintenance burden.
+
+### Changed
+- **Testability refactor (behavior-equivalent)**: Clipboard capture logic extracted from `ClipboardMonitor` into `ClipboardItemFactory` (behind a `PasteboardReading` protocol), and paste-back logic extracted from `PanelView` into `ClipboardWriter` (behind a `PasteboardWriting` protocol); detail-panel display decisions moved into `ClipboardItem.detailLines` / `footerStatText`. No behavior changes. Added 36 tests covering fileURLs persistence round-trips (save/loadAllLight/searchLight, dedup update), detail display fallbacks, capture priority rules (file > image > text, existence filtering, text-vs-fileURL), and paste-back branches (36 new tests, 176 total).
 
 ## [1.3.3] - 2026-06-29
 
