@@ -125,6 +125,27 @@ struct ClipboardItem: Identifiable, Codable {
 }
 }
 
+// MARK: - Detail Display
+extension ClipboardItem {
+
+    /// 详情面板逐行渲染的内容
+    /// 文件条目返回完整路径（content 只是文件名，用于列表紧凑展示），其余返回整段 content
+    var detailLines: [String] {
+        if contentType == .filePath, let paths = fileURLs, !paths.isEmpty {
+            return paths
+        }
+        return [content]
+    }
+
+    /// 详情面板底部统计文本：文件条目显示文件数，其余显示字符数
+    var footerStatText: String {
+        if contentType == .filePath, let paths = fileURLs, !paths.isEmpty {
+            return "\(paths.count) 个文件"
+        }
+        return "\(content.count) 字符"
+    }
+}
+
 // MARK: - Content Type Detection
 extension ClipboardItem {
 

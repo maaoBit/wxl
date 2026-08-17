@@ -67,110 +67,22 @@ class ClipboardMonitor: ObservableObject {
     private func processClipboardContent() {
         // 获取来源应用
         let sourceApp = getActiveApplication()
-        Logger.debug("processClipboardContent started, sourceApp: \(sourceApp?.localizedName ?? "nil")", category: .clipboard)
-        
-        // 检测顺序很重要：文件 > 图片 > 文本
-        // 因为复制文件时可能同时有文件URL和图标数据
-        
-        // ========== 1. 首先检测文件 ==========
-        // 检查 NSFilenamesPboardType（多文件）
-        if let fileURLsData = pasteboard.propertyList(forType: NSPasteboard.PasteboardType("NSFilenamesPboardType")) as? [String],
-           !fileURLsData.isEmpty {
-            Logger.debug("Found NSFilenamesPboardType: \(fileURLsData)", category: .clipboard)
-            let existingFiles = fileURLsData.filter { FileManager.default.fileExists(atPath: $0) }
-            Logger.debug("Existing files: \(existingFiles.count)/\(fileURLsData.count)", category: .clipboard)
-            
-            if !existingFiles.isEmpty {
-                // 所有文件都保存为 filePath 类型，不区分图片
-                let fileNames = existingFiles.map { ($0 as NSString).lastPathComponent }
-                let previewText = fileNames.count == 1 ? fileNames[0] : "\(fileNames.count) 个文件"
-                let item = ClipboardItem(
-                    content: previewText,
-                    contentType: .filePath,
-                    sourceApp: sourceApp?.localizedName,
-                    sourceAppBundle: sourceApp?.bundleIdentifier,
-                    fileURLs: existingFiles
-                )
-                Logger.log("Calling onNewClip for file (NSFilenamesPboardType): \(existingFiles)", category: .clipboard)
-                onNewClip?(item)
-                return
-            }
-        }
-        
-        // 检查单个 fileURL
-        let hasTextContent = pasteboard.string(forType: .string) != nil
-        if let fileURLData = pasteboard.data(forType: .fileURL),
-           let fileURLString = String(data: fileURLData, encoding: .utf8),
-           !fileURLString.isEmpty {
-            Logger.debug("Found fileURL: \(fileURLString)", category: .clipboard)
-            
-            if let url = URL(string: fileURLString),
-               url.isFileURL,
-               FileManager.default.fileExists(atPath: url.path),
-               !hasTextContent {
-                // 所有文件都保存为 filePath 类型
-                // 保存纯路径，而不是 file:// URL
-                let item = ClipboardItem(
-                    content: url.lastPathComponent,
-                    contentType: .filePath,
-                    sourceApp: sourceApp?.localizedName,
-                    sourceAppBundle: sourceApp?.bundleIdentifier,
-                    fileURLs: [url.path]  // 使用 url.path 而不是 fileURLString
-                )
-                Logger.log("Calling onNewClip for file (single fileURL): \(url.path)", category: .clipboard)
-                onNewClip?(item)
-                return
-            }
-        }
-        
-        // ========== 2. 检测纯图片数据（剪贴板中的截图等） ==========
-        let imageTypes: [NSPasteboard.PasteboardType] = [
-            .png, .tiff,
-            NSPasteboard.PasteboardType("public.jpeg"),
-            NSPasteboard.PasteboardType("public.png"),
-            NSPasteboard.PasteboardType("public.tiff"),
-            NSPasteboard.PasteboardType("public.image"),
-            NSPasteboard.PasteboardType("com.apple.pict"),
-            NSPasteboard.PasteboardType("com.compuserve.gif"),
-            NSPasteboard.PasteboardType("com.microsoft.bmp")
-        ]
 
-        for imageType in imageTypes {
-            if let imageData = pasteboard.data(forType: imageType) {
-                Logger.debug("Found image type: \(imageType.rawValue)", category: .clipboard)
-                let item = ClipboardItem(
-                    content: "[Image]",
-                    contentType: .image,
-                    sourceApp: sourceApp?.localizedName,
-                    sourceAppBundle: sourceApp?.bundleIdentifier,
-                    imageData: imageData
-                )
-                Logger.log("Calling onNewClip for image", category: .clipboard)
-                onNewClip?(item)
-                performOCR(on: imageData, item: item)
-                return
-            }
-        }
-        
-        // ========== 3. 检测文本 ==========
-        Logger.debug("Checking for text content...", category: .clipboard)
-        guard let content = pasteboard.string(forType: .string),
-              !content.isEmpty else {
-            Logger.debug("No text content found, returning", category: .clipboard)
+        guard let item = ClipboardItemFactory.makeItem(
+            from: pasteboard,
+            sourceApp: sourceApp?.localizedName,
+            sourceAppBundle: sourceApp?.bundleIdentifier
+        ) else {
+            Logger.debug("No recognizable clipboard content", category: .clipboard)
             return
         }
 
-        Logger.log("Found text content: \(content.prefix(50))...", category: .clipboard)
-
-        let contentType = ClipboardItem.detectContentType(content)
-        let item = ClipboardItem(
-            content: content,
-            contentType: contentType,
-            sourceApp: sourceApp?.localizedName,
-            sourceAppBundle: sourceApp?.bundleIdentifier
-        )
-        Logger.log("Calling onNewClip for text, contentType=\(contentType)", category: .clipboard)
         onNewClip?(item)
+
+        // 图片条目异步 OCR 识别
+        if item.contentType == .image, let imageData = item.imageData {
+            performOCR(on: imageData, item: item)
+        }
     }
 
     private func getActiveApplication() -> NSRunningApplication? {
