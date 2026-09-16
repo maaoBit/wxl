@@ -114,9 +114,11 @@ class ClipboardMonitor: ObservableObject {
                 if !recognizedText.isEmpty {
                     ClipboardStorage.shared.updateOCRTextSync(item.id, text: recognizedText)
 
-                    DispatchQueue.global(qos: .utility).async {
-                        let items = ClipboardStorage.shared.loadAllLight()
-                        DispatchQueue.main.async {
+                    // 内存内补丁 ocrText，避免全量 loadAllLight 重载打乱面板状态
+                    DispatchQueue.main.async {
+                        var items = AppState.shared.clipboardItems
+                        if let index = items.firstIndex(where: { $0.id == item.id }) {
+                            items[index].ocrText = recognizedText
                             AppState.shared.clipboardItems = items
                         }
                     }

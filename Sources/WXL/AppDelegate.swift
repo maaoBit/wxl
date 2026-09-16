@@ -199,35 +199,36 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    /// 串行入库队列：图片 SHA256 + SQLite blob 写入较慢，移出主线程避免复制大图时卡顿。
+    /// 串行保证多个快速复制按序入库
+    private let storageQueue = DispatchQueue(label: "com.wxl.storage.save", qos: .userInitiated)
+
     private func handleNewClipboardItem(_ item: ClipboardItem) {
         Logger.debug("New clipboard item detected: \(item.previewText)", category: .clipboard)
-        let isNew = clipboardStorage.save(item)
-        
-        if isNew {
-            // 新项目：直接在主线程插入，无需数据库查询
-            DispatchQueue.main.async { [weak self] in
-                guard let self = self else { return }
-                var items = AppState.shared.clipboardItems
-                let insertIndex = items.firstIndex(where: { !$0.isPinned }) ?? items.count
-                items.insert(item, at: insertIndex)
-                AppState.shared.clipboardItems = items
-                Logger.debug("Inserted new item at index \(insertIndex), total: \(items.count)", category: .ui)
-                
+
+        storageQueue.async { [weak self] in
+            guard let self = self else { return }
+            let isNew = self.clipboardStorage.save(item)
+
+            DispatchQueue.main.async {
+                if isNew {
+                    // 新项目：主线程直接插入，无需数据库查询
+                    var items = AppState.shared.clipboardItems
+                    let insertIndex = items.firstIndex(where: { !$0.isPinned }) ?? items.count
+                    items.insert(item, at: insertIndex)
+                    AppState.shared.clipboardItems = items
+                    Logger.debug("Inserted new item at index \(insertIndex), total: \(items.count)", category: .ui)
+                } else {
+                    // 重复项目：内存内把该项移到所在分区首位（与其刚刷新的 createdAt 一致），
+                    // 不再全量 loadAllLight 重载
+                    AppState.shared.clipboardItems = ClipboardItem.reorderAfterUse(
+                        AppState.shared.clipboardItems,
+                        usedItemId: item.id
+                    )
+                }
+
                 if self.panel.isVisible {
                     AppState.shared.selectedIndex = 0
-                }
-            }
-        } else {
-            // 重复项目：在后台线程加载，避免阻塞主线程
-            DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-                let items = self?.clipboardStorage.loadAllLight() ?? []
-                DispatchQueue.main.async {
-                    AppState.shared.clipboardItems = items
-                    Logger.debug("Refreshed with loadAllLight for duplicate, total: \(items.count)", category: .ui)
-                    
-                    if self?.panel.isVisible == true {
-                        AppState.shared.selectedIndex = 0
-                    }
                 }
             }
         }

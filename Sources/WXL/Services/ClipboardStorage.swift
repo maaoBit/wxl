@@ -13,6 +13,9 @@ import CryptoKit
 class ClipboardStorage {
     static let shared = ClipboardStorage()
 
+    /// FTS 索引迁移标记：user_version 达到该值时跳过全量重建
+    static let schemaVersionFTSIndex = 2
+
     private var db: Connection?
     private let itemsTable = Table("clipboard_items")
     private let idCol = Expression<String>("id")
@@ -152,20 +155,26 @@ class ClipboardStorage {
             try db?.run(itemsTable.createIndex(createdAtCol, ifNotExists: true))
 
             // 创建 FTS5 虚拟表用于全文搜索
+            // 全量重建用 PRAGMA user_version 做一次性迁移标记：
+            // 此前每次启动都 DELETE+全量重插，启动耗时随历史条数线性增长
             do {
+                let userVersion = ((try? db?.scalar("PRAGMA user_version")) ?? nil).flatMap { $0 as? Int64 } ?? 0
                 try db?.run("""
                     CREATE VIRTUAL TABLE IF NOT EXISTS clipboard_fts USING fts5(
                         id UNINDEXED, content, ocrText
                     )
                 """)
-                // 从主表重建 FTS 索引
-                try db?.run("DELETE FROM clipboard_fts")
-                try db?.run("""
-                    INSERT INTO clipboard_fts(rowid, id, content, ocrText)
-                    SELECT rowid, id, content, COALESCE(ocrText, '') FROM clipboard_items
-                """)
+                if userVersion < Self.schemaVersionFTSIndex {
+                    Logger.log("Rebuilding FTS index (schema v\(userVersion) -> v\(Self.schemaVersionFTSIndex))...", category: .database)
+                    try db?.run("DELETE FROM clipboard_fts")
+                    try db?.run("""
+                        INSERT INTO clipboard_fts(rowid, id, content, ocrText)
+                        SELECT rowid, id, content, COALESCE(ocrText, '') FROM clipboard_items
+                    """)
+                }
+                try db?.run("PRAGMA user_version = \(Self.schemaVersionFTSIndex)")
                 ftsAvailable = true
-                Logger.log("FTS5 virtual table created and indexed", category: .database)
+                Logger.log("FTS5 virtual table ready", category: .database)
             } catch {
                 ftsAvailable = false
                 Logger.error("FTS5 setup error (will fallback to LIKE): \(error)", category: .database)
