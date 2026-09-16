@@ -32,6 +32,36 @@ enum ContentType: String, Codable, CaseIterable {
     }
 }
 
+// MARK: - Type Filter
+/// 面板顶部的类型筛选 chips
+enum FilterCategory: String, CaseIterable, Hashable {
+    case all, text, link, file, image
+
+    var label: String {
+        switch self {
+        case .all: return "全部"
+        case .text: return "文本"
+        case .link: return "链接"
+        case .file: return "文件"
+        case .image: return "图片"
+        }
+    }
+
+    func matches(_ type: ContentType) -> Bool {
+        if self == .all { return true }
+        switch type {
+        case .url:
+            return self == .link
+        case .filePath:
+            return self == .file
+        case .image:
+            return self == .image
+        case .text, .code, .email, .phoneNumber:
+            return self == .text
+        }
+    }
+}
+
 // MARK: - Clipboard Item
 struct ClipboardItem: Identifiable, Codable {
     let id: UUID

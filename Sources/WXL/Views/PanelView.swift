@@ -29,6 +29,9 @@ struct PanelView: View {
                 // 搜索栏
                 searchBar
 
+                // 类型筛选
+                filterChips
+
                 // 主内容区域 - 左右分栏
                 if appState.filteredItems.isEmpty {
                     emptyState
@@ -56,6 +59,33 @@ struct PanelView: View {
         .onChange(of: appState.searchText) { _, _ in
             loadedCount = pageSize
         }
+        .onChange(of: appState.selectedFilter) { _, _ in
+            loadedCount = pageSize
+        }
+    }
+
+    // MARK: - Filter Chips
+    private var filterChips: some View {
+        HStack(spacing: 8) {
+            ForEach(FilterCategory.allCases, id: \.self) { category in
+                let isSelected = appState.selectedFilter == category
+                Button {
+                    appState.selectedFilter = category
+                } label: {
+                    Text(category.label)
+                        .font(.system(size: 11, weight: isSelected ? .semibold : .regular))
+                        .foregroundColor(isSelected ? .primary : .secondary)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 3)
+                        .background(
+                            Capsule().fill(isSelected ? Color.accentColor.opacity(0.25) : Color.primary.opacity(0.05))
+                        )
+                }
+                .buttonStyle(.plain)
+            }
+            Spacer()
+        }
+        .padding(.bottom, 8)
     }
 
     // MARK: - Main Content (左右分栏)
@@ -127,7 +157,11 @@ struct PanelView: View {
                             },
                             onDelete: {
                                 deleteItem(item)
-                            }
+                            },
+                            onCopy: {
+                                copyItem(item)
+                            },
+                            openAction: getAction(for: item)
                         )
                         .id(item.id)
                     }
@@ -433,6 +467,15 @@ struct PanelView: View {
             ? (item.imageData ?? ClipboardStorage.shared.loadImageData(item.id))
             : nil
 
+        ClipboardWriter.write(item, to: NSPasteboard.general, imageData: imageData)
+    }
+
+    /// 右键菜单「复制内容」：仅写回剪贴板，不触发粘贴流程（不忽略监听，
+    /// 监听器会按既有语义刷新该项时间戳）
+    private func copyItem(_ item: ClipboardItem) {
+        let imageData: Data? = item.contentType == .image
+            ? (item.imageData ?? ClipboardStorage.shared.loadImageData(item.id))
+            : nil
         ClipboardWriter.write(item, to: NSPasteboard.general, imageData: imageData)
     }
 

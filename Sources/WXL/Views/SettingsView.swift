@@ -68,10 +68,11 @@ struct GeneralSettingsView: View {
     @Binding var maxHistoryCount: Int
     @Binding var launchAtLogin: Bool
     @AppStorage("checkForUpdatesOnLaunch") private var checkForUpdatesOnLaunch: Bool = true
-    
+    @State private var showClearConfirmation = false
+
     let expiryOptions = [6, 12, 24, 48, 72, 168] // hours
     let countOptions = [100, 200, 500, 1000, 2000]
-    
+
     var body: some View {
         Form {
             Section("历史记录") {
@@ -83,7 +84,7 @@ struct GeneralSettingsView: View {
                     }
                     .frame(width: 120)
                 }
-                
+
                 LabeledContent("最大历史条数") {
                     Picker("", selection: $maxHistoryCount) {
                         ForEach(countOptions, id: \.self) { count in
@@ -92,8 +93,12 @@ struct GeneralSettingsView: View {
                     }
                     .frame(width: 120)
                 }
+                .onChange(of: maxHistoryCount) { _, _ in
+                    // 立即按新上限清理，而不是等下一次保存时才生效
+                    ClipboardStorage.shared.limitHistoryCount()
+                }
             }
-            
+
             Section("启动") {
                 Toggle("登录时自动启动", isOn: $launchAtLogin)
                     .onChange(of: launchAtLogin) { _, newValue in
@@ -101,6 +106,26 @@ struct GeneralSettingsView: View {
                     }
 
                 Toggle("启动时自动检查更新", isOn: $checkForUpdatesOnLaunch)
+            }
+
+            Section("数据") {
+                Button(role: .destructive) {
+                    showClearConfirmation = true
+                } label: {
+                    Label("清空全部历史", systemImage: "trash")
+                }
+                .confirmationDialog(
+                    "确定清空全部历史记录？",
+                    isPresented: $showClearConfirmation,
+                    titleVisibility: .visible
+                ) {
+                    Button("清空（含置顶项）", role: .destructive) {
+                        ClipboardStorage.shared.deleteAll()
+                        AppState.shared.clipboardItems = []
+                    }
+                } message: {
+                    Text("所有剪贴板历史（包括置顶项）将被永久删除，此操作不可恢复。")
+                }
             }
         }
         .formStyle(.grouped)

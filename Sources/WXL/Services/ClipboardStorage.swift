@@ -387,6 +387,18 @@ class ClipboardStorage {
         }
     }
 
+    /// 清空全部历史（含置顶项），供设置页「清空历史」使用
+    func deleteAll() {
+        queue.sync {
+            do {
+                try db?.run(itemsTable.delete())
+                try db?.run("DELETE FROM clipboard_fts")
+            } catch {
+                Logger.error("Delete all error: \(error)", category: .database)
+            }
+        }
+    }
+
     func togglePin(_ itemId: UUID) {
         queue.sync {
             do {

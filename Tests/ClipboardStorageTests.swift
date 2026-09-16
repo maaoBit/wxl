@@ -416,6 +416,23 @@ final class ClipboardStorageTests: XCTestCase {
         XCTAssertTrue(results.contains { $0.id == item.id }, "OCR 中文文本应可通过搜索找到")
     }
 
+    // MARK: - Delete All Tests
+
+    func testDeleteAll_RemovesEverythingIncludingPinned() {
+        let pinned = ClipboardItem(content: "pinned")
+        storage.save(pinned)
+        storage.togglePin(pinned.id)
+        storage.save(ClipboardItem(content: "normal"))
+
+        XCTAssertFalse(storage.loadAll().isEmpty)
+
+        storage.deleteAll()
+
+        XCTAssertTrue(storage.loadAll().isEmpty, "清空后应无任何记录（含置顶项）")
+        // FTS 索引同步清空：残留索引会让搜索命中已删除内容
+        XCTAssertTrue(storage.searchLight(query: "pinned").isEmpty, "FTS 索引应一并清空")
+    }
+
     // MARK: - Clean Expired Items Tests
 
     func testCleanExpiredItems_RemovesExpired() {

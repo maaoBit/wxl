@@ -14,6 +14,8 @@ struct CompactClipboardItemRow: View {
     let onPaste: () -> Void
     let onPin: () -> Void
     let onDelete: () -> Void
+    var onCopy: () -> Void = {}
+    var openAction: (() -> Void)? = nil
 
     var body: some View {
         HStack(spacing: 8) {
@@ -81,6 +83,41 @@ struct CompactClipboardItemRow: View {
         }
         .onTapGesture(count: 2) {
             onPaste()
+        }
+        .contextMenu {
+            Button("粘贴") {
+                onPaste()
+            }
+            Button("复制内容") {
+                onCopy()
+            }
+
+            Divider()
+
+            Button(item.isPinned ? "取消置顶" : "置顶") {
+                onPin()
+            }
+            if let openAction = openAction {
+                Button(openActionTitle) {
+                    openAction()
+                }
+            }
+
+            Divider()
+
+            Button("删除", role: .destructive) {
+                onDelete()
+            }
+        }
+    }
+
+    private var openActionTitle: String {
+        switch item.contentType {
+        case .url: return "在浏览器中打开"
+        case .filePath: return "在 Finder 中显示"
+        case .email: return "发送邮件"
+        case .phoneNumber: return "FaceTime"
+        default: return "打开"
         }
     }
     
