@@ -29,6 +29,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // 加载现有数据（轻量级，不加载 imageData）
         AppState.shared.clipboardItems = clipboardStorage.loadAllLight()
 
+        // 后台为存量图片条目补缩略图（一次性迁移），完成后刷新列表
+        DispatchQueue.global(qos: .utility).async {
+            ClipboardStorage.shared.backfillThumbnails()
+            DispatchQueue.main.async {
+                AppState.shared.clipboardItems = ClipboardStorage.shared.loadAllLight()
+            }
+        }
+
         // 初始化剪贴板监听
         clipboardMonitor = ClipboardMonitor.shared
         clipboardMonitor.onNewClip = { [weak self] item in
@@ -438,6 +446,9 @@ class KeyboardHandlingPanel: NSPanel {
 
         // 隐藏应用，macOS 会自动将焦点返回到之前的应用
         NSApplication.shared.hide(nil)
+
+        // 设置开启且已授权辅助功能时，向此前台应用模拟 ⌘V
+        AutoPasteService.fireIfEnabled()
     }
 
     private func performAction() {

@@ -437,6 +437,9 @@ struct PanelView: View {
         copyToClipboard(item)
         dismissPanel()
         NSApplication.shared.hide(nil)
+
+        // 设置开启且已授权辅助功能时，向此前台应用模拟 ⌘V
+        AutoPasteService.fireIfEnabled()
     }
 
     private func togglePin(_ item: ClipboardItem) {

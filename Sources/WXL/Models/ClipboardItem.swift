@@ -75,6 +75,7 @@ struct ClipboardItem: Identifiable, Codable {
 
     // 图片数据（如果有）
     var imageData: Data?
+    var thumbnail: Data? // 列表缩略图（图片条目）
     var ocrText: String? // OCR 识别的文字
     var fileURLs: [String]? // 文件 URL 列表
 
@@ -139,7 +140,8 @@ struct ClipboardItem: Identifiable, Codable {
         expiresAt: Date?,
         imageData: Data?,
         ocrText: String?,
-        fileURLs: [String]? = nil
+        fileURLs: [String]? = nil,
+        thumbnail: Data? = nil
     ) {
         self.id = id
         self.content = content
@@ -150,6 +152,7 @@ struct ClipboardItem: Identifiable, Codable {
         self.isPinned = isPinned
         self.expiresAt = expiresAt
         self.imageData = imageData
+        self.thumbnail = thumbnail
         self.ocrText = ocrText
         self.fileURLs = fileURLs
 }

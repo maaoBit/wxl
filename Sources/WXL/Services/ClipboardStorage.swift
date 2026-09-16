@@ -15,6 +15,8 @@ class ClipboardStorage {
 
     /// FTS 索引迁移标记：user_version 达到该值时跳过全量重建
     static let schemaVersionFTSIndex = 2
+    /// 缩略图列迁移标记
+    static let schemaVersionThumbnail = 3
 
     private var db: Connection?
     private let itemsTable = Table("clipboard_items")
@@ -30,6 +32,7 @@ class ClipboardStorage {
     private let imageDataCol = Expression<Data?>("imageData")
     private let ocrTextCol = Expression<String?>("ocrText")
     private let fileURLsCol = Expression<String?>("fileURLs")
+    private let thumbnailCol = Expression<Data?>("thumbnail")
     private let queue = DispatchQueue(label: "com.wxl.clipboardstorage", qos: .userInitiated)
 
     /// FTS5 全文搜索是否可用
@@ -89,6 +92,7 @@ class ClipboardStorage {
                 t.column(imageDataCol)
                 t.column(ocrTextCol)
                 t.column(fileURLsCol)
+                t.column(thumbnailCol)
             })
 
             // 检查并添加 contentHash 列（如果表已存在但缺少该列）
@@ -157,8 +161,8 @@ class ClipboardStorage {
             // 创建 FTS5 虚拟表用于全文搜索
             // 全量重建用 PRAGMA user_version 做一次性迁移标记：
             // 此前每次启动都 DELETE+全量重插，启动耗时随历史条数线性增长
+            let userVersion = ((try? db?.scalar("PRAGMA user_version")) ?? nil).flatMap { $0 as? Int64 } ?? 0
             do {
-                let userVersion = ((try? db?.scalar("PRAGMA user_version")) ?? nil).flatMap { $0 as? Int64 } ?? 0
                 try db?.run("""
                     CREATE VIRTUAL TABLE IF NOT EXISTS clipboard_fts USING fts5(
                         id UNINDEXED, content, ocrText
@@ -171,13 +175,33 @@ class ClipboardStorage {
                         INSERT INTO clipboard_fts(rowid, id, content, ocrText)
                         SELECT rowid, id, content, COALESCE(ocrText, '') FROM clipboard_items
                     """)
+                    try db?.run("PRAGMA user_version = \(Self.schemaVersionFTSIndex)")
                 }
-                try db?.run("PRAGMA user_version = \(Self.schemaVersionFTSIndex)")
                 ftsAvailable = true
                 Logger.log("FTS5 virtual table ready", category: .database)
             } catch {
                 ftsAvailable = false
                 Logger.error("FTS5 setup error (will fallback to LIKE): \(error)", category: .database)
+            }
+
+            // 检查并添加 thumbnail 列（旧库升级；新库已在建表语句中）
+            var hasThumbnail = false
+            do {
+                _ = try db?.pluck(itemsTable.select(thumbnailCol).limit(1))
+                hasThumbnail = true
+            } catch {
+                hasThumbnail = false
+            }
+            if !hasThumbnail {
+                Logger.log("Adding thumbnail column to existing database...", category: .database)
+                do {
+                    try db?.run(itemsTable.addColumn(thumbnailCol, defaultValue: nil))
+                } catch {
+                    Logger.error("Error adding thumbnail column: \(error)", category: .database)
+                }
+            }
+            if userVersion < Self.schemaVersionThumbnail {
+                try db?.run("PRAGMA user_version = \(Self.schemaVersionThumbnail)")
             }
 
             // 仅在生产模式下执行自动清理
@@ -208,6 +232,14 @@ class ClipboardStorage {
                 // 检查是否已存在相同内容
                 let existingItem = itemsTable.filter(contentHashCol == hash)
 
+                // 图片条目生成列表缩略图（避免列表每行解码全尺寸图）
+                let thumbnail: Data?
+                if item.contentType == .image, let imageData = item.imageData {
+                    thumbnail = ThumbnailGenerator.generate(from: imageData)
+                } else {
+                    thumbnail = nil
+                }
+
                 if let existing = try db?.pluck(existingItem) {
                     let existingId = try existing.get(idCol)
 
@@ -236,6 +268,9 @@ class ClipboardStorage {
                            let jsonString = String(data: jsonData, encoding: .utf8) {
                             updateBuilders.append(fileURLsCol <- jsonString)
                         }
+                    }
+                    if let thumbnail = thumbnail {
+                        updateBuilders.append(thumbnailCol <- thumbnail)
                     }
 
                     let updateItem = itemsTable.filter(idCol == existingId)
@@ -268,7 +303,8 @@ class ClipboardStorage {
                     expiresAtCol <- item.expiresAt?.timeIntervalSince1970,
                     imageDataCol <- item.imageData,
                     ocrTextCol <- item.ocrText,
-                    fileURLsCol <- fileURLsJSON
+                    fileURLsCol <- fileURLsJSON,
+                    thumbnailCol <- thumbnail
                 )
                 try db?.run(insert)
                 self.syncFTS5(id: item.id.uuidString, content: item.content, ocrText: item.ocrText)
@@ -340,7 +376,7 @@ class ClipboardStorage {
                 let query = itemsTable
                     .select(idCol, contentCol, contentHashCol, contentTypeCol, sourceAppCol,
                             sourceAppBundleCol, createdAtCol, isPinnedCol, expiresAtCol,
-                            ocrTextCol, fileURLsCol)
+                            ocrTextCol, fileURLsCol, thumbnailCol)
                     .order(isPinnedCol.desc, createdAtCol.desc)
                 for row in try database.prepare(query) {
                     if let item = parseRowLight(row) {
@@ -351,7 +387,7 @@ class ClipboardStorage {
                 Logger.error("Load all light error: \(error)", category: .database)
             }
             return items
-        }
+    }
     }
 
     /// 加载单个项目的 imageData（用于轻量级列表中按需获取图片数据）
@@ -442,6 +478,31 @@ class ClipboardStorage {
             }
         } catch {
             Logger.error("Update OCR error: \(error)", category: .database)
+        }
+    }
+
+    /// 为存量图片条目补生成缩略图（旧库升级后一次性后台执行）。
+    /// 完成后由调用方决定是否重载列表
+    func backfillThumbnails() {
+        queue.sync {
+            guard let database = db else { return }
+            do {
+                let query = itemsTable
+                    .select(idCol, imageDataCol)
+                    .filter(contentTypeCol == ContentType.image.rawValue && thumbnailCol == nil)
+                for row in try database.prepare(query) {
+                    guard let idString = try? row.get(idCol),
+                          let imageData = try? row.get(imageDataCol),
+                          let thumbnail = ThumbnailGenerator.generate(from: imageData) else {
+                        continue
+                    }
+                    try database.run(
+                        itemsTable.filter(idCol == idString).update(thumbnailCol <- thumbnail)
+                    )
+                }
+            } catch {
+                Logger.error("Backfill thumbnails error: \(error)", category: .database)
+            }
         }
     }
 
@@ -586,7 +647,7 @@ class ClipboardStorage {
             var searchQuery = itemsTable
                 .select(idCol, contentCol, contentHashCol, contentTypeCol, sourceAppCol,
                         sourceAppBundleCol, createdAtCol, isPinnedCol, expiresAtCol,
-                        ocrTextCol, fileURLsCol)
+                        ocrTextCol, fileURLsCol, thumbnailCol)
                 .filter(matchingIds.contains(idCol))
 
             if let app = sourceApp {
@@ -615,7 +676,7 @@ class ClipboardStorage {
             var searchQuery = itemsTable
                 .select(idCol, contentCol, contentHashCol, contentTypeCol, sourceAppCol,
                         sourceAppBundleCol, createdAtCol, isPinnedCol, expiresAtCol,
-                        ocrTextCol, fileURLsCol)
+                        ocrTextCol, fileURLsCol, thumbnailCol)
 
             if !query.isEmpty {
                 let lowerQuery = query.lowercased()
@@ -761,6 +822,7 @@ class ClipboardStorage {
             let isPinned = try row.get(isPinnedCol)
             let expiresAtInterval = try row.get(expiresAtCol)
             let ocrText = try row.get(ocrTextCol)
+            let thumbnail = try row.get(thumbnailCol)
 
             var fileURLs: [String]? = nil
             if let fileURLsJSON = try row.get(fileURLsCol),
@@ -784,7 +846,8 @@ class ClipboardStorage {
                 expiresAt: expiresAtInterval.map { Date(timeIntervalSince1970: $0) },
                 imageData: nil,
                 ocrText: ocrText,
-                fileURLs: fileURLs
+                fileURLs: fileURLs,
+                thumbnail: thumbnail
             )
         } catch {
             Logger.error("Parse row light error: \(error)", category: .database)

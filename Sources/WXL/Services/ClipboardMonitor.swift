@@ -73,6 +73,12 @@ class ClipboardMonitor: ObservableObject {
         // 获取来源应用
         let sourceApp = getActiveApplication()
 
+        // 排除名单内的应用（如密码管理器）不进入历史
+        if AppExclusion.isExcluded(sourceApp?.bundleIdentifier) {
+            Logger.debug("Skipping capture from excluded app: \(sourceApp?.bundleIdentifier ?? "?")", category: .clipboard)
+            return
+        }
+
         guard let item = ClipboardItemFactory.makeItem(
             from: pasteboard,
             sourceApp: sourceApp?.localizedName,

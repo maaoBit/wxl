@@ -124,13 +124,22 @@ struct CompactClipboardItemRow: View {
     // MARK: - Type Icon
     @ViewBuilder
     private var typeIcon: some View {
-        if item.contentType == .filePath, let fileURLs = item.fileURLs, let firstPath = fileURLs.first {
+    if item.contentType == .filePath, let fileURLs = item.fileURLs, let firstPath = fileURLs.first {
         // 显示文件的真实图标
         let icon = NSWorkspace.shared.icon(forFile: firstPath)
         Image(nsImage: icon)
             .resizable()
             .aspectRatio(contentMode: .fit)
             .frame(width: 14, height: 14)
+    } else if item.contentType == .image,
+              let thumbnailData = item.thumbnail,
+              let thumbnailImage = NSImage(data: thumbnailData) {
+        // 图片条目显示缩略图（无缩略图的旧条目回退到类型图标）
+        Image(nsImage: thumbnailImage)
+            .resizable()
+            .aspectRatio(contentMode: .fill)
+            .frame(width: 18, height: 18)
+            .clipShape(RoundedRectangle(cornerRadius: 4))
     } else {
         Image(systemName: item.contentType.icon)
             .font(.system(size: 11, weight: .medium))

@@ -8,6 +8,7 @@
 import SwiftUI
 import KeyboardShortcuts
 import ServiceManagement
+import UniformTypeIdentifiers
 
 struct SettingsView: View {
     @AppStorage("expiryHours") private var expiryHours: Int = 24
@@ -68,7 +69,9 @@ struct GeneralSettingsView: View {
     @Binding var maxHistoryCount: Int
     @Binding var launchAtLogin: Bool
     @AppStorage("checkForUpdatesOnLaunch") private var checkForUpdatesOnLaunch: Bool = true
+    @AppStorage("autoPasteAfterSelection") private var autoPasteAfterSelection = false
     @State private var showClearConfirmation = false
+    @State private var excludedApps: [String] = []
 
     let expiryOptions = [6, 12, 24, 48, 72, 168] // hours
     let countOptions = [100, 200, 500, 1000, 2000]
@@ -96,6 +99,59 @@ struct GeneralSettingsView: View {
                 .onChange(of: maxHistoryCount) { _, _ in
                     // 立即按新上限清理，而不是等下一次保存时才生效
                     ClipboardStorage.shared.limitHistoryCount()
+                }
+            }
+
+            Section("粘贴") {
+                Toggle("选中后自动粘贴到当前应用", isOn: $autoPasteAfterSelection)
+                if autoPasteAfterSelection {
+                    if AutoPasteService.isTrusted {
+                        Text("已授权：选中条目后会自动向此前的前台应用发送 ⌘V")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    } else {
+                        HStack {
+                            Text("需要「辅助功能」权限才能模拟按键")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            Spacer()
+                            Button("打开设置") {
+                                if let url = AutoPasteService.accessibilitySettingsURL {
+                                    NSWorkspace.shared.open(url)
+                                }
+                            }
+                            .buttonStyle(.bordered)
+                            .controlSize(.small)
+                        }
+                    }
+                }
+            }
+
+            Section("隐私") {
+                if excludedApps.isEmpty {
+                    Text("可将某些应用（如密码管理器）排除在剪贴板历史之外")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else {
+                    ForEach(excludedApps, id: \.self) { bundleID in
+                        HStack {
+                            Text(AppExclusion.displayName(for: bundleID))
+                            Spacer()
+                            Button {
+                                AppExclusion.remove(bundleID)
+                                refreshExcluded()
+                            } label: {
+                                Image(systemName: "minus.circle.fill")
+                                    .foregroundColor(.red.opacity(0.7))
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                }
+                Button {
+                    addExcludedApp()
+                } label: {
+                    Label("添加应用…", systemImage: "plus")
                 }
             }
 
@@ -149,6 +205,28 @@ struct GeneralSettingsView: View {
             } else {
                 try? service.unregister()
             }
+        }
+    }
+
+    private func refreshExcluded() {
+        excludedApps = Array(AppExclusion.excludedBundleIDs).sorted()
+    }
+
+    private func addExcludedApp() {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = true
+        panel.directoryURL = URL(fileURLWithPath: "/Applications")
+        panel.allowedContentTypes = [.application]
+        panel.begin { response in
+            guard response == .OK else { return }
+            for url in panel.urls {
+                if let bundle = Bundle(url: url), let bundleID = bundle.bundleIdentifier {
+                    AppExclusion.add(bundleID)
+                }
+            }
+            refreshExcluded()
         }
     }
 }
