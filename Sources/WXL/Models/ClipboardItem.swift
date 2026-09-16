@@ -196,6 +196,22 @@ extension ClipboardItem {
 
         return .text
     }
+
+    /// 使用后重排：把指定项移到其所在分区（置顶区/普通区）首位
+    /// 列表顺序须与 DB 排序一致（ORDER BY isPinned DESC, createdAt DESC），
+    /// 置顶区在前、普通区在后
+    static func reorderAfterUse(_ items: [ClipboardItem], usedItemId: UUID) -> [ClipboardItem] {
+        var items = items
+        guard let currentIndex = items.firstIndex(where: { $0.id == usedItemId }) else {
+            return items
+        }
+        let movedItem = items.remove(at: currentIndex)
+        let insertIndex = movedItem.isPinned
+            ? 0
+            : (items.firstIndex(where: { !$0.isPinned }) ?? items.count)
+        items.insert(movedItem, at: insertIndex)
+        return items
+    }
 }
 
 // MARK: - Array Extension

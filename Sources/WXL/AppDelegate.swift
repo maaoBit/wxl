@@ -388,18 +388,10 @@ class KeyboardHandlingPanel: NSPanel {
     private func pasteSelected() {
         guard let item = AppState.shared.selectedItem else { return }
 
-        // 刷新时间戳，将该项移到顶部（如果是置顶项则不移动）
-        if !item.isPinned {
-            ClipboardStorage.shared.refreshTimestamp(item.id)
-            var items = AppState.shared.clipboardItems
-            if let currentIndex = items.firstIndex(where: { $0.id == item.id }) {
-                let movedItem = items.remove(at: currentIndex)
-                let insertIndex = items.firstIndex(where: { !$0.isPinned }) ?? items.count
-                items.insert(movedItem, at: insertIndex)
-                AppState.shared.clipboardItems = items
-            }
-            AppState.shared.selectedIndex = 0
-        }
+        // 刷新时间戳并移到所在分区（置顶区/普通区）首位
+        ClipboardStorage.shared.refreshTimestamp(item.id)
+        AppState.shared.clipboardItems = ClipboardItem.reorderAfterUse(AppState.shared.clipboardItems, usedItemId: item.id)
+        AppState.shared.selectedIndex = 0
 
         // 通知监听器忽略即将发生的剪贴板变化
         ClipboardMonitor.shared.setIgnoreNextChange()

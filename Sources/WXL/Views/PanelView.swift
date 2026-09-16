@@ -389,18 +389,11 @@ struct PanelView: View {
     private func pasteSelected() {
         guard let item = appState.selectedItem else { return }
 
-        if !item.isPinned {
-            ClipboardStorage.shared.refreshTimestamp(item.id)
-            // 内存内重排序，避免在主线程加载全部数据（含 imageData）导致卡顿
-            var items = appState.clipboardItems
-            if let currentIndex = items.firstIndex(where: { $0.id == item.id }) {
-                let movedItem = items.remove(at: currentIndex)
-                let insertIndex = items.firstIndex(where: { !$0.isPinned }) ?? items.count
-                items.insert(movedItem, at: insertIndex)
-                appState.clipboardItems = items
-            }
-            appState.selectedIndex = 0
-        }
+        // 刷新时间戳并移到所在分区（置顶区/普通区）首位
+        // 内存内重排序，避免在主线程加载全部数据（含 imageData）导致卡顿
+        ClipboardStorage.shared.refreshTimestamp(item.id)
+        appState.clipboardItems = ClipboardItem.reorderAfterUse(appState.clipboardItems, usedItemId: item.id)
+        appState.selectedIndex = 0
 
         // 通知监听器忽略即将发生的剪贴板变化
         ClipboardMonitor.shared.setIgnoreNextChange()
