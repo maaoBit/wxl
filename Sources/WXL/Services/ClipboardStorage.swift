@@ -97,14 +97,9 @@ class ClipboardStorage {
 
             // 检查并添加 contentHash 列（如果表已存在但缺少该列）
             // 尝试查询 contentHash 列来检测是否存在
-            var hasContentHash = false
-            do {
-                let testQuery = itemsTable.select(contentHashCol).limit(1)
-                _ = try db?.pluck(testQuery)
-                hasContentHash = true
-            } catch {
-                hasContentHash = false
-            }
+            // 检查并添加 contentHash 列（同 thumbnail：必须用 PRAGMA 探测，
+            // pluck 对缺失列不抛错会误判为已存在）
+            let hasContentHash = columnExists("contentHash", in: "clipboard_items")
 
             if !hasContentHash {
                 Logger.log("Adding contentHash column to existing database...", category: .database)
@@ -134,14 +129,7 @@ class ClipboardStorage {
             }
 
             // 检查并添加 fileURLs 列（如果表已存在但缺少该列）
-            var hasFileURLs = false
-            do {
-                let testQuery = itemsTable.select(fileURLsCol).limit(1)
-                _ = try db?.pluck(testQuery)
-                hasFileURLs = true
-            } catch {
-                hasFileURLs = false
-            }
+            let hasFileURLs = columnExists("fileURLs", in: "clipboard_items")
 
             if !hasFileURLs {
                 Logger.log("Adding fileURLs column to existing database...", category: .database)
@@ -184,15 +172,12 @@ class ClipboardStorage {
                 Logger.error("FTS5 setup error (will fallback to LIKE): \(error)", category: .database)
             }
 
-            // 检查并添加 thumbnail 列（旧库升级；新库已在建表语句中）
-            var hasThumbnail = false
-            do {
-                _ = try db?.pluck(itemsTable.select(thumbnailCol).limit(1))
-                hasThumbnail = true
-            } catch {
-                hasThumbnail = false
-            }
-            if !hasThumbnail {
+            // 检查并添加 thumbnail 列（旧库升级；新库已在建表语句中）。
+            // 不能用 select(...) 是否抛错探测：SQLite.swift 的 pluck 对
+            // "no such column" 不抛错而是返回 nil（v1.5.0 因此误判列已存在，
+            // 而版本号又被标记为已迁移，导致所有新条目入库失败被静默丢弃）。
+            // 必须查 PRAGMA table_info。
+            if !columnExists("thumbnail", in: "clipboard_items") {
                 Logger.log("Adding thumbnail column to existing database...", category: .database)
                 do {
                     try db?.run(itemsTable.addColumn(thumbnailCol, defaultValue: nil))
@@ -677,6 +662,22 @@ class ClipboardStorage {
     }
 
     // MARK: - Helpers
+
+    /// 检查表中某列是否存在（PRAGMA table_info；错误一律按不存在处理，交由上层重试迁移）
+    private func columnExists(_ column: String, in table: String) -> Bool {
+        guard let database = db else { return false }
+        do {
+            let stmt = try database.prepare("PRAGMA table_info(\(table))")
+            for row in stmt {
+                if row[1] as? String == column {
+                    return true
+                }
+            }
+        } catch {
+            Logger.error("table_info check error: \(error)", category: .database)
+        }
+        return false
+    }
 
     private func syncFTS5(id: String, content: String, ocrText: String?) {
         guard ftsAvailable, let database = db else { return }

@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.5.1] - 2026-09-16
+
+### Fixed
+- **New captures were silently discarded on upgrade from ≤1.4.x (regression of the 1.5.0 thumbnail migration)**: the `thumbnail` column probe used SQLite.swift's `pluck`, which does **not** throw for a missing column (it returns nil), so the migration wrongly concluded the column already existed, skipped `ALTER TABLE`, and still marked the schema as migrated (`PRAGMA user_version = 3`). Every subsequent insert of *new* content failed with "table clipboard_items has no column named thumbnail" and was dropped; only re-copies of existing content (which take the UPDATE path) appeared to refresh. Column existence is now checked via `PRAGMA table_info` (self-healing on launch; the same fix was applied to the older `contentHash`/`fileURLs` probes which shared the flaw). Added regression tests reproducing the exact broken state.
+
+### Changed
+- **Clipboard polling is no longer suspended by App Nap**: as a menu-bar (accessory) app with no visible window, WXL's 0.5 s polling timer could be throttled by App Nap, and everything copied during a suspension window was lost (the poll only ever sees the latest pasteboard state after waking). The monitor now holds a `userInitiated` activity so the timer keeps firing; system sleep is still allowed.
+
 ## [1.5.0] - 2026-09-16
 
 ### Added

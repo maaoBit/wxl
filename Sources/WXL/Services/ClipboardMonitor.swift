@@ -18,6 +18,9 @@ class ClipboardMonitor: ObservableObject {
     /// 我们自己写入剪贴板后的预期 changeCount；轮询时仅忽略等于该值的那次变化
     /// （布尔标志会在「粘贴后 0.5s 内用户又复制」时把用户的复制一并吞掉）
     private var ignoredChangeCount: Int?
+    /// 阻止 App Nap 的活动令牌：菜单栏应用无可见窗口时，系统会挂起定时器，
+    /// 导致挂起期间的所有复制全部丢失
+    private var activityToken: NSObjectProtocol?
 
     var onNewClip: ((ClipboardItem) -> Void)?
 
@@ -34,11 +37,22 @@ class ClipboardMonitor: ObservableObject {
 
         // 确保在主线程运行
         RunLoop.current.add(timer!, forMode: .common)
+
+        // 声明 userInitiated 活动，App Nap 不再节流轮询定时器
+        // （允许系统正常休眠，只豁免本进程的定时器节流）
+        activityToken = ProcessInfo.processInfo.beginActivity(
+            options: [.userInitiatedAllowingIdleSystemSleep],
+            reason: "WXL clipboard polling"
+        )
     }
 
     func stopMonitoring() {
         timer?.invalidate()
         timer = nil
+        if let token = activityToken {
+            ProcessInfo.processInfo.endActivity(token)
+            activityToken = nil
+        }
     }
 
     /// 忽略我们自己写回剪贴板引起的那次变化（用于粘贴操作）。
