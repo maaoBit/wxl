@@ -398,24 +398,29 @@ class ClipboardStorage {
     func updateOCRText(_ itemId: UUID, text: String) {
         queue.async { [weak self] in
             guard let self = self else { return }
-            do {
-                let itemToUpdate = self.itemsTable.filter(self.idCol == itemId.uuidString)
-                try self.db?.run(itemToUpdate.update(self.ocrTextCol <- text))
-            } catch {
-                Logger.error("Update OCR error: \(error)", category: .database)
-            }
+            self.updateOCRTextWithinQueue(itemId: itemId, text: text)
         }
     }
 
     /// 同步更新 OCR 文本（确保在 loadAll 之前完成）
     func updateOCRTextSync(_ itemId: UUID, text: String) {
         queue.sync {
-            do {
-                let itemToUpdate = itemsTable.filter(idCol == itemId.uuidString)
-                try db?.run(itemToUpdate.update(ocrTextCol <- text))
-            } catch {
-                Logger.error("Update OCR sync error: \(error)", category: .database)
+            updateOCRTextWithinQueue(itemId: itemId, text: text)
+        }
+    }
+
+    /// 须在 queue 内调用。同步 FTS 索引是必须的：FTS 命中失败不会回退 LIKE，
+    /// 不同步会导致图片 OCR 文本永远搜不到
+    private func updateOCRTextWithinQueue(itemId: UUID, text: String) {
+        do {
+            let itemToUpdate = itemsTable.filter(idCol == itemId.uuidString)
+            try db?.run(itemToUpdate.update(ocrTextCol <- text))
+            if let row = try db?.pluck(itemToUpdate.select(contentCol)) {
+                let content = try row.get(contentCol)
+                syncFTS5(id: itemId.uuidString, content: content, ocrText: text)
             }
+        } catch {
+            Logger.error("Update OCR error: \(error)", category: .database)
         }
     }
 
@@ -514,7 +519,9 @@ class ClipboardStorage {
     }
 
     /// 轻量级搜索，优先使用 FTS5 全文搜索，不加载 imageData
-    /// - 当 FTS5 不可用或查询出错时，自动回退到 LIKE 搜索
+    /// - 当 FTS5 不可用、查询出错或结果为空时，自动回退到 LIKE 搜索
+    ///   （空结果回退是必须的：unicode61 分词器不切分中文，
+    ///   "屏幕上的验证码" 是单个 token，子串 "验证码" FTS 匹配不到）
     func searchLight(query: String, sourceApp: String? = nil, limit: Int = 100) -> [ClipboardItem] {
         return queue.sync { () -> [ClipboardItem] in
             guard let database = db else { return [] }
@@ -522,7 +529,10 @@ class ClipboardStorage {
             // 优先尝试 FTS5 全文搜索
             if ftsAvailable && !query.isEmpty {
                 if let ftsItems = searchByFTS(database: database, query: query, sourceApp: sourceApp) {
-                    return ftsItems
+                    if !ftsItems.isEmpty {
+                        return ftsItems
+                    }
+                    // FTS 查询成功但无命中，可能是 CJK 子串盲区，继续走 LIKE
                 }
                 // FTS 查询失败（如特殊字符导致语法错误）则回退到 LIKE
             }

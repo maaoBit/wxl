@@ -442,50 +442,18 @@ class KeyboardHandlingPanel: NSPanel {
     private func performAction() {
         guard let item = AppState.shared.selectedItem else { return }
 
+        // 统一走 IntelligentActionService（补 scheme、trim、不存在时回退父目录等）
+        let service = IntelligentActionService.shared
         switch item.contentType {
         case .url:
-            // 在浏览器中打开
-            var urlString = item.content.trimmingCharacters(in: .whitespacesAndNewlines)
-            // 如果没有 scheme，添加 https
-            if !urlString.hasPrefix("http://") && !urlString.hasPrefix("https://") {
-                urlString = "https://" + urlString
-            }
-            // 尝试直接创建 URL，如果失败则尝试编码
-            if let url = URL(string: urlString) ?? URL(string: urlString.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? "") {
-                NSWorkspace.shared.open(url)
-            }
+            service.openURL(item.content)
         case .filePath:
-            // 在 Finder 中显示
-            // 优先使用 fileURLs（完整路径），而不是 content（只是文件名）
-            if let filePath = item.fileURLs?.first {
-                let url = URL(fileURLWithPath: filePath)
-                if FileManager.default.fileExists(atPath: filePath) {
-                    NSWorkspace.shared.activateFileViewerSelecting([url])
-                } else {
-                    // 文件不存在，打开父目录
-                    NSWorkspace.shared.open(url.deletingLastPathComponent())
-                }
-            } else if !item.content.isEmpty {
-                // 兼容旧数据：如果 fileURLs 为空，尝试从 content 构建路径
-                let expandedPath = (item.content as NSString).expandingTildeInPath
-                let url = URL(fileURLWithPath: expandedPath)
-                if FileManager.default.fileExists(atPath: expandedPath) {
-                    NSWorkspace.shared.activateFileViewerSelecting([url])
-                } else {
-                    NSWorkspace.shared.open(url.deletingLastPathComponent())
-                }
-            }
+            // 优先 fileURLs（完整路径）；旧数据可能只有 content，兼容回退
+            service.revealInFinder(item.fileURLs?.first ?? item.content)
         case .email:
-            // 发送邮件
-            if let url = URL(string: "mailto:\(item.content)") {
-                NSWorkspace.shared.open(url)
-            }
+            service.openEmail(item.content)
         case .phoneNumber:
-            // FaceTime
-            let cleaned = item.content.replacingOccurrences(of: "\\s|\\-|\\(|\\)", with: "", options: .regularExpression)
-            if let url = URL(string: "facetime://\(cleaned)") {
-                NSWorkspace.shared.open(url)
-            }
+            service.openFaceTime(item.content)
         default:
             break
         }

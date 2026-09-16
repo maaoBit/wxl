@@ -16,7 +16,9 @@ class ClipboardMonitor: ObservableObject {
     private var timer: Timer?
     private var pasteboard: NSPasteboard
     private var isPasting: Bool = false // 标志位：是否正在粘贴
-    private var ignoreNextChange: Bool = false // 是否忽略下一次变化
+    /// 我们自己写入剪贴板后的预期 changeCount；轮询时仅忽略等于该值的那次变化
+    /// （布尔标志会在「粘贴后 0.5s 内用户又复制」时把用户的复制一并吞掉）
+    private var ignoredChangeCount: Int?
 
     var onNewClip: ((ClipboardItem) -> Void)?
 
@@ -40,9 +42,10 @@ class ClipboardMonitor: ObservableObject {
         timer = nil
     }
 
-    /// 忽略下一次剪贴板变化（用于粘贴操作）
+    /// 忽略我们自己写回剪贴板引起的那次变化（用于粘贴操作）。
+    /// 须在写入剪贴板之前调用
     func setIgnoreNextChange() {
-        ignoreNextChange = true
+        ignoredChangeCount = pasteboard.changeCount + 1
     }
 
     private func checkForChanges() {
@@ -52,15 +55,17 @@ class ClipboardMonitor: ObservableObject {
 
         Logger.log("Clipboard changed! old=\(changeCount), new=\(currentCount)", category: .clipboard)
 
-        // 如果设置了忽略标志，跳过这次变化
-        if ignoreNextChange {
-            Logger.debug("Ignoring this change (ignoreNextChange=true)", category: .clipboard)
-            changeCount = currentCount
-            ignoreNextChange = false
-            return
+        changeCount = currentCount
+
+        // 只跳过我们自己引起的那次变化；期间用户的其他复制正常捕获
+        if let ignored = ignoredChangeCount {
+            ignoredChangeCount = nil
+            if currentCount == ignored {
+                Logger.debug("Ignoring own paste change (count=\(currentCount))", category: .clipboard)
+                return
+            }
         }
 
-        changeCount = currentCount
         processClipboardContent()
     }
 

@@ -368,19 +368,21 @@ struct PanelView: View {
     }
 
     private func getAction(for item: ClipboardItem) -> (() -> Void)? {
+        // 统一走 IntelligentActionService（补 scheme、trim、不存在时回退父目录等）
+        let service = IntelligentActionService.shared
         switch item.contentType {
         case .url:
-            return { openURL(item.content) }
+            return { service.openURL(item.content) }
         case .filePath:
             // 使用 fileURLs 中的完整路径，而不是 content（只是文件名）
             if let filePath = item.fileURLs?.first {
-                return { revealInFinder(filePath) }
+                return { service.revealInFinder(filePath) }
             }
             return nil
         case .email:
-            return { openEmail(item.content) }
+            return { service.openEmail(item.content) }
         case .phoneNumber:
-            return { openFaceTime(item.content) }
+            return { service.openFaceTime(item.content) }
         default:
             return nil
         }
@@ -444,39 +446,5 @@ struct PanelView: View {
 
         pasteDown?.post(tap: .cgAnnotatedSessionEventTap)
         pasteUp?.post(tap: .cgAnnotatedSessionEventTap)
-    }
-
-    // MARK: - External Actions
-
-    private func openURL(_ urlString: String) {
-        if let url = URL(string: urlString) {
-            NSWorkspace.shared.open(url)
-        }
-    }
-
-    private func revealInFinder(_ path: String) {
-        let expandedPath = (path as NSString).expandingTildeInPath
-        let url = URL(fileURLWithPath: expandedPath)
-
-        if FileManager.default.fileExists(atPath: expandedPath) {
-            NSWorkspace.shared.activateFileViewerSelecting([url])
-        } else {
-            // 尝试打开父目录
-            let parentURL = url.deletingLastPathComponent()
-            NSWorkspace.shared.open(parentURL)
-        }
-    }
-
-    private func openEmail(_ email: String) {
-        if let url = URL(string: "mailto:\(email)") {
-            NSWorkspace.shared.open(url)
-        }
-    }
-
-    private func openFaceTime(_ phone: String) {
-        let cleaned = phone.replacingOccurrences(of: "\\s|\\-|\\(|\\)", with: "", options: .regularExpression)
-        if let url = URL(string: "facetime://\(cleaned)") {
-            NSWorkspace.shared.open(url)
-        }
     }
 }

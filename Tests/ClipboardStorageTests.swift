@@ -392,6 +392,30 @@ final class ClipboardStorageTests: XCTestCase {
         XCTAssertGreaterThan(refreshedItem?.createdAt ?? Date.distantPast, originalTime ?? Date.distantFuture)
     }
 
+    // MARK: - OCR Text Search Tests
+
+    func testUpdateOCRTextSync_SearchableViaFTS() {
+        // 回归：OCR 文本必须同步进 FTS 索引，否则图片中的文字搜不到
+        // （FTS 查询成功但结果为空时不会回退 LIKE）
+        let item = ClipboardItem(content: "[Image]", contentType: .image)
+        storage.save(item)
+
+        storage.updateOCRTextSync(item.id, text: "发票号码 12345678")
+
+        let results = storage.searchLight(query: "12345678")
+        XCTAssertTrue(results.contains { $0.id == item.id }, "OCR 文本应可通过搜索找到")
+    }
+
+    func testUpdateOCRTextSync_SearchableByChinesePartial() {
+        let item = ClipboardItem(content: "[Image]", contentType: .image)
+        storage.save(item)
+
+        storage.updateOCRTextSync(item.id, text: "屏幕上的验证码是8888")
+
+        let results = storage.searchLight(query: "验证码")
+        XCTAssertTrue(results.contains { $0.id == item.id }, "OCR 中文文本应可通过搜索找到")
+    }
+
     // MARK: - Clean Expired Items Tests
 
     func testCleanExpiredItems_RemovesExpired() {
