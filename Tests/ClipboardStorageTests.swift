@@ -223,6 +223,19 @@ final class ClipboardStorageTests: XCTestCase {
         XCTAssertFalse(items.first?.isPinned ?? true)
     }
 
+    func testTogglePin_UnpinRestoresExpiry() {
+        // 回归：取消置顶后应恢复保留期，否则该项永不过期
+        let item = ClipboardItem(content: "Test item")
+        storage.save(item)
+        storage.togglePin(item.id) // Pin（expiresAt 清空）
+        storage.togglePin(item.id) // Unpin
+
+        let restored = storage.loadAll().first
+        XCTAssertFalse(restored?.isPinned ?? true)
+        XCTAssertNotNil(restored?.expiresAt, "取消置顶后应恢复过期时间")
+        XCTAssertGreaterThan(restored?.expiresAt ?? Date(), Date(), "过期时间应在未来")
+    }
+
     func testTogglePin_PinnedItemExpiresAtNil() {
         let item = ClipboardItem(content: "Test item")
         storage.save(item)
@@ -243,7 +256,7 @@ final class ClipboardStorageTests: XCTestCase {
         storage.save(ClipboardItem(content: "Banana fruit"))
         storage.save(ClipboardItem(content: "Car vehicle"))
 
-        let results = storage.search(query: "fruit")
+        let results = storage.searchLight(query: "fruit")
 
         XCTAssertEqual(results.count, 2)
     }
@@ -253,7 +266,7 @@ final class ClipboardStorageTests: XCTestCase {
         storage.save(ClipboardItem(content: "Hello Swift"))
         storage.save(ClipboardItem(content: "Goodbye"))
 
-        let results = storage.search(query: "Hello")
+        let results = storage.searchLight(query: "Hello")
 
         XCTAssertEqual(results.count, 2)
     }
@@ -262,7 +275,7 @@ final class ClipboardStorageTests: XCTestCase {
         storage.save(ClipboardItem(content: "Item 1"))
         storage.save(ClipboardItem(content: "Item 2"))
 
-        let results = storage.search(query: "")
+        let results = storage.searchLight(query: "")
 
         XCTAssertEqual(results.count, 2)
     }
@@ -272,7 +285,7 @@ final class ClipboardStorageTests: XCTestCase {
         storage.save(ClipboardItem(content: "Content 2", sourceApp: "Chrome"))
         storage.save(ClipboardItem(content: "Content 3", sourceApp: "Safari"))
 
-        let results = storage.search(query: "", sourceApp: "Safari")
+        let results = storage.searchLight(query: "", sourceApp: "Safari")
 
         XCTAssertEqual(results.count, 2)
     }
@@ -282,7 +295,7 @@ final class ClipboardStorageTests: XCTestCase {
         storage.save(ClipboardItem(content: "Apple Chrome", sourceApp: "Chrome"))
         storage.save(ClipboardItem(content: "Banana Safari", sourceApp: "Safari"))
 
-        let results = storage.search(query: "Apple", sourceApp: "Safari")
+        let results = storage.searchLight(query: "Apple", sourceApp: "Safari")
 
         XCTAssertEqual(results.count, 1)
         XCTAssertEqual(results.first?.content, "Apple Safari")
@@ -291,7 +304,7 @@ final class ClipboardStorageTests: XCTestCase {
     func testSearch_NoMatch() {
         storage.save(ClipboardItem(content: "Hello World"))
 
-        let results = storage.search(query: "xyz123notfound")
+        let results = storage.searchLight(query: "xyz123notfound")
 
         XCTAssertEqual(results.count, 0)
     }
@@ -299,7 +312,7 @@ final class ClipboardStorageTests: XCTestCase {
     func testSearch_CaseInsensitive() {
         storage.save(ClipboardItem(content: "Hello World"))
 
-        let results = storage.search(query: "HELLO")
+        let results = storage.searchLight(query: "HELLO")
 
         // 使用 LOWER() 函数实现大小写不敏感
         XCTAssertEqual(results.count, 1)
@@ -310,7 +323,7 @@ final class ClipboardStorageTests: XCTestCase {
         storage.save(ClipboardItem(content: "测试内容"))
         storage.save(ClipboardItem(content: "Hello World"))
 
-        let results = storage.search(query: "你好")
+        let results = storage.searchLight(query: "你好")
 
         XCTAssertEqual(results.count, 1)
         XCTAssertEqual(results.first?.content, "你好世界")
@@ -320,7 +333,7 @@ final class ClipboardStorageTests: XCTestCase {
         storage.save(ClipboardItem(content: "这是一个测试"))
         storage.save(ClipboardItem(content: "其他内容"))
 
-        let results = storage.search(query: "测试")
+        let results = storage.searchLight(query: "测试")
 
         XCTAssertEqual(results.count, 1)
     }
@@ -329,8 +342,8 @@ final class ClipboardStorageTests: XCTestCase {
         storage.save(ClipboardItem(content: "Hello世界"))
         storage.save(ClipboardItem(content: "World测试"))
 
-        let results1 = storage.search(query: "hello")
-        let results2 = storage.search(query: "世界")
+        let results1 = storage.searchLight(query: "hello")
+        let results2 = storage.searchLight(query: "世界")
 
         XCTAssertEqual(results1.count, 1)
         XCTAssertEqual(results2.count, 1)
@@ -340,39 +353,9 @@ final class ClipboardStorageTests: XCTestCase {
         storage.save(ClipboardItem(content: "HeLLo WoRLd"))
         storage.save(ClipboardItem(content: "Goodbye"))
 
-        let results = storage.search(query: "hello")
+        let results = storage.searchLight(query: "hello")
 
         XCTAssertEqual(results.count, 1)
-    }
-
-    // MARK: - Get Unique Source Apps Tests
-
-    func testGetUniqueSourceApps() {
-        storage.save(ClipboardItem(content: "1", sourceApp: "Safari"))
-        storage.save(ClipboardItem(content: "2", sourceApp: "Chrome"))
-        storage.save(ClipboardItem(content: "3", sourceApp: "Safari"))
-        storage.save(ClipboardItem(content: "4", sourceApp: nil))
-
-        let apps = storage.getUniqueSourceApps()
-
-        XCTAssertEqual(apps.count, 2)
-        XCTAssertTrue(apps.contains("Safari"))
-        XCTAssertTrue(apps.contains("Chrome"))
-    }
-
-    func testGetUniqueSourceApps_EmptyDatabase() {
-        let apps = storage.getUniqueSourceApps()
-        XCTAssertEqual(apps.count, 0)
-    }
-
-    func testGetUniqueSourceApps_OrderedAlphabetically() {
-        storage.save(ClipboardItem(content: "1", sourceApp: "Zebra"))
-        storage.save(ClipboardItem(content: "2", sourceApp: "Apple"))
-        storage.save(ClipboardItem(content: "3", sourceApp: "Chrome"))
-
-        let apps = storage.getUniqueSourceApps()
-
-        XCTAssertEqual(apps, ["Apple", "Chrome", "Zebra"])
     }
 
     // MARK: - Refresh Timestamp Tests

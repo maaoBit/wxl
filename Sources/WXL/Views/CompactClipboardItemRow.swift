@@ -125,8 +125,8 @@ struct CompactClipboardItemRow: View {
     @ViewBuilder
     private var typeIcon: some View {
     if item.contentType == .filePath, let fileURLs = item.fileURLs, let firstPath = fileURLs.first {
-        // 显示文件的真实图标
-        let icon = NSWorkspace.shared.icon(forFile: firstPath)
+        // 显示文件的真实图标（带缓存，icon(forFile:) 每次调用都访问磁盘）
+        let icon = FileIconCache.icon(forPath: firstPath)
         Image(nsImage: icon)
             .resizable()
             .aspectRatio(contentMode: .fit)

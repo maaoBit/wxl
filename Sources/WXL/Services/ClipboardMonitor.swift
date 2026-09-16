@@ -15,7 +15,6 @@ class ClipboardMonitor: ObservableObject {
     private var changeCount: Int
     private var timer: Timer?
     private var pasteboard: NSPasteboard
-    private var isPasting: Bool = false // 标志位：是否正在粘贴
     /// 我们自己写入剪贴板后的预期 changeCount；轮询时仅忽略等于该值的那次变化
     /// （布尔标志会在「粘贴后 0.5s 内用户又复制」时把用户的复制一并吞掉）
     private var ignoredChangeCount: Int?

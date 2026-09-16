@@ -232,14 +232,10 @@ struct PanelView: View {
 
                 // 完整内容
                 ScrollView {
-                    // 轻量级加载的列表中 imageData 可能为 nil，按需从数据库加载
-                    let imageData = item.imageData ?? ClipboardStorage.shared.loadImageData(item.id)
-                    if item.contentType == .image, let imageData = imageData, let nsImage = NSImage(data: imageData) {
+                    if item.contentType == .image {
                         VStack(alignment: .leading, spacing: 12) {
-                            // 图片
-                            Image(nsImage: nsImage)
-                                .resizable()
-                                .aspectRatio(contentMode: .fit)
+                            // 图片（轻量级列表 imageData 为 nil 时异步按需加载）
+                            DetailImageView(item: item)
 
                             // OCR 识别结果
                             if let ocrText = item.ocrText, !ocrText.isEmpty {
@@ -481,16 +477,39 @@ struct PanelView: View {
             : nil
         ClipboardWriter.write(item, to: NSPasteboard.general, imageData: imageData)
     }
+}
 
-    private func simulatePaste() {
-        let source = CGEventSource(stateID: .combinedSessionState)
-        let pasteDown = CGEvent(keyboardEventSource: source, virtualKey: 0x09, keyDown: true)
-        let pasteUp = CGEvent(keyboardEventSource: source, virtualKey: 0x09, keyDown: false)
+/// 详情面板大图异步加载：列表为轻量级（imageData 为 nil），选中时按需从库中读取，
+/// 避免在视图 body 里同步读库解码大图造成卡顿
+private struct DetailImageView: View {
+    let item: ClipboardItem
+    @State private var loadedImage: NSImage?
 
-        pasteDown?.flags = .maskCommand
-        pasteUp?.flags = .maskCommand
+    var body: some View {
+        Group {
+            if let inline = item.imageData, let inlineImage = NSImage(data: inline) {
+                imageView(inlineImage)
+            } else if let loadedImage = loadedImage {
+                imageView(loadedImage)
+            } else {
+                ProgressView()
+                    .frame(maxWidth: .infinity, minHeight: 80)
+            }
+        }
+        .task(id: item.id) {
+            guard item.imageData == nil, loadedImage == nil else { return }
+            let data = await Task.detached(priority: .userInitiated) {
+                ClipboardStorage.shared.loadImageData(item.id)
+            }.value
+            if let data = data {
+                loadedImage = NSImage(data: data)
+            }
+        }
+    }
 
-        pasteDown?.post(tap: .cgAnnotatedSessionEventTap)
-        pasteUp?.post(tap: .cgAnnotatedSessionEventTap)
+    private func imageView(_ nsImage: NSImage) -> some View {
+        Image(nsImage: nsImage)
+            .resizable()
+            .aspectRatio(contentMode: .fit)
     }
 }

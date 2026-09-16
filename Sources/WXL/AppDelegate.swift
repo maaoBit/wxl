@@ -254,7 +254,6 @@ extension AppDelegate: NSWindowDelegate {
 
 // MARK: - Custom Panel with Keyboard Handling
 class KeyboardHandlingPanel: NSPanel {
-    private var hostingView: NSHostingView<PanelView>? = nil
     private var eventMonitor: Any?
 
     override var acceptsFirstResponder: Bool {
@@ -279,6 +278,12 @@ class KeyboardHandlingPanel: NSPanel {
         isOpaque = false
         backgroundColor = .clear
         hasShadow = true
+
+        // 内容视图只创建一次：PanelView 观察 AppState 单例，数据更新由 SwiftUI 驱动，
+        // 无需每次 show 时重建 hostingView
+        let hostingView = NSHostingView(rootView: PanelView())
+        hostingView.autoresizingMask = [.width, .height]
+        self.contentView = hostingView
     }
 
     override func keyDown(with event: NSEvent) {
@@ -354,25 +359,7 @@ class KeyboardHandlingPanel: NSPanel {
         }
     }
 
-    func refreshContentView() {
-        let contentView = PanelView()
-        let newHostingView = NSHostingView(rootView: contentView)
-        newHostingView.autoresizingMask = [.width, .height]
-        newHostingView.frame = NSRect(x: 0, y: 0, width: self.frame.width, height: self.frame.height)
-
-        // 移除旧的 hostingView
-        if let oldHostingView = self.contentView as? NSHostingView<PanelView> {
-            oldHostingView.removeFromSuperview()
-        }
-
-        self.contentView = newHostingView
-        hostingView = newHostingView
-    }
-
     func show() {
-        // 刷新内容视图以显示最新数据
-        refreshContentView()
-
         // 获取鼠标位置
         let mouseLocation = NSEvent.mouseLocation
         let screenFrame = NSScreen.main?.visibleFrame ?? NSRect.zero
@@ -421,26 +408,12 @@ class KeyboardHandlingPanel: NSPanel {
         // 通知监听器忽略即将发生的剪贴板变化
         ClipboardMonitor.shared.setIgnoreNextChange()
 
-        // 复制到剪贴板
-        NSPasteboard.general.clearContents()
-        if item.contentType == .image {
-            // 轻量级加载的列表中 imageData 可能为 nil，按需从数据库加载
-            let imageData = item.imageData ?? ClipboardStorage.shared.loadImageData(item.id)
-            if let imageData = imageData, let nsImage = NSImage(data: imageData) {
-                // 使用 NSImage 写入剪贴板，让系统自动处理格式
-                NSPasteboard.general.writeObjects([nsImage] as [NSPasteboardWriting])
-            } else {
-                NSPasteboard.general.setString(item.content, forType: .string)
-            }
-        } else if item.contentType == .filePath, let fileURLs = item.fileURLs, !fileURLs.isEmpty {
-            // 写入文件 URL 到剪贴板
-            let urls = fileURLs.compactMap { URL(fileURLWithPath: $0) }
-            if !urls.isEmpty {
-                NSPasteboard.general.writeObjects(urls as [NSURL])
-            }
-        } else {
-            NSPasteboard.general.setString(item.content, forType: .string)
-        }
+        // 复制到剪贴板（轻量级列表中 imageData 可能为 nil，按需加载）
+        let imageData: Data? = item.contentType == .image
+            ? (item.imageData ?? ClipboardStorage.shared.loadImageData(item.id))
+            : nil
+        ClipboardWriter.write(item, to: NSPasteboard.general, imageData: imageData)
+
         // 关闭面板
         orderOut(nil)
 
@@ -508,17 +481,5 @@ class KeyboardHandlingPanel: NSPanel {
                 }
             }
         }
-    }
-
-    private func simulatePaste() {
-        let source = CGEventSource(stateID: .combinedSessionState)
-        let pasteDown = CGEvent(keyboardEventSource: source, virtualKey: 0x09, keyDown: true)
-        let pasteUp = CGEvent(keyboardEventSource: source, virtualKey: 0x09, keyDown: false)
-
-        pasteDown?.flags = .maskCommand
-        pasteUp?.flags = .maskCommand
-
-        pasteDown?.post(tap: .cgAnnotatedSessionEventTap)
-        pasteUp?.post(tap: .cgAnnotatedSessionEventTap)
     }
 }

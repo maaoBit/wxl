@@ -444,6 +444,12 @@ class ClipboardStorage {
                     try db?.run(itemToUpdate.update(isPinnedCol <- !currentPinned))
                     if !currentPinned {
                         try db?.run(itemToUpdate.update(expiresAtCol <- nil))
+                    } else {
+                        // 取消置顶后恢复保留期，否则该项永不过期
+                        let expiryHours = UserDefaults.standard.integer(forKey: "expiryHours")
+                        let hours = expiryHours > 0 ? expiryHours : 24
+                        let newExpiry = Date().addingTimeInterval(TimeInterval(hours) * 3600)
+                        try db?.run(itemToUpdate.update(expiresAtCol <- newExpiry.timeIntervalSince1970))
                     }
                 }
             } catch {
@@ -564,42 +570,6 @@ class ClipboardStorage {
 
     // MARK: - Search
 
-    func search(query: String, sourceApp: String? = nil, limit: Int = 100) -> [ClipboardItem] {
-        return queue.sync { () -> [ClipboardItem] in
-            var items: [ClipboardItem] = []
-            guard let database = db else { return items }
-            do {
-                var searchQuery = itemsTable
-
-                if !query.isEmpty {
-                    let lowerQuery = query.lowercased()
-                    let lowerContent = contentCol.lowercaseString
-                    let lowerOcrText = ocrTextCol.lowercaseString
-
-                    searchQuery = searchQuery.filter(
-                        lowerContent.like("%\(lowerQuery)%") ||
-                        (ocrTextCol != nil && lowerOcrText.like("%\(lowerQuery)%"))
-                    )
-                }
-
-                if let app = sourceApp {
-                    searchQuery = searchQuery.filter(sourceAppCol == app)
-                }
-
-                searchQuery = searchQuery.order(isPinnedCol.desc, createdAtCol.desc).limit(limit)
-
-                for row in try database.prepare(searchQuery) {
-                    if let item = parseRow(row) {
-                        items.append(item)
-                    }
-                }
-            } catch {
-                Logger.error("Search error: \(error)", category: .database)
-            }
-            return items
-        }
-    }
-
     /// 轻量级搜索，优先使用 FTS5 全文搜索，不加载 imageData
     /// - 当 FTS5 不可用、查询出错或结果为空时，自动回退到 LIKE 搜索
     ///   （空结果回退是必须的：unicode61 分词器不切分中文，
@@ -704,28 +674,6 @@ class ClipboardStorage {
             Logger.error("Search light (LIKE) error: \(error)", category: .database)
         }
         return items
-    }
-
-    func getUniqueSourceApps() -> [String] {
-        return queue.sync {
-            var apps: [String] = []
-            guard let database = db else { return apps }
-            do {
-                let query = itemsTable
-                    .select(distinct: sourceAppCol)
-                    .filter(sourceAppCol != nil)
-                    .order(sourceAppCol)
-
-                for row in try database.prepare(query) {
-                    if let app = try row.get(sourceAppCol) {
-                        apps.append(app)
-                    }
-                }
-            } catch {
-                Logger.error("Get source apps error: \(error)", category: .database)
-            }
-            return apps
-        }
     }
 
     // MARK: - Helpers
