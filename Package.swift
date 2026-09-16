@@ -16,7 +16,8 @@ let package = Package(
     ],
     dependencies: [
         // Keyboard shortcuts
-        .package(url: "https://github.com/sindresorhus/KeyboardShortcuts.git", from: "2.0.0"),
+        // 3.x 修复 macOS 26/27 Recorder 崩溃（含 Bundle.module 断言、Swift 6.3 release 崩溃）
+        .package(url: "https://github.com/sindresorhus/KeyboardShortcuts.git", from: "3.0.0"),
         // SQLite wrapper
         .package(url: "https://github.com/stephencelis/SQLite.swift.git", from: "0.14.1"),
     ],

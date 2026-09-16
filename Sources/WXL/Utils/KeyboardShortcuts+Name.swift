@@ -8,5 +8,6 @@
 import KeyboardShortcuts
 
 extension KeyboardShortcuts.Name {
-    static let togglePanel = Self("togglePanel", default: .init(.c, modifiers: [.command, .shift]))
+    // 3.x 起 `default:` 参数更名为 `initial:`
+    static let togglePanel = Self("togglePanel", initial: .init(.c, modifiers: [.command, .shift]))
 }

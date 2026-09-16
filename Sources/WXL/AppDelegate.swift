@@ -45,6 +45,18 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // 注册全局快捷键
         setupHotKeys()
 
+        // 调试/自动化测试用：启动即打开设置窗口（WXL_SETTINGS_TAB 可指定
+        // general/appearance/shortcuts/about，用于无人值守渲染指定设置页）
+        if ProcessInfo.processInfo.arguments.contains("--open-settings") {
+            switch ProcessInfo.processInfo.environment["WXL_SETTINGS_TAB"] {
+            case "appearance": UpdateChecker.shared.requestedSettingsTab = .appearance
+            case "shortcuts": UpdateChecker.shared.requestedSettingsTab = .shortcuts
+            case "about": UpdateChecker.shared.requestedSettingsTab = .about
+            default: break
+            }
+            showSettings()
+        }
+
         // 启动时自动检查更新（后台异步，不阻塞 UI）
         if UserDefaults.standard.object(forKey: "checkForUpdatesOnLaunch") as? Bool ?? true {
             DispatchQueue.global(qos: .utility).async {
@@ -170,8 +182,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func setupHotKeys() {
-        KeyboardShortcuts.onKeyUp(for: .togglePanel) { [weak self] in
-            self?.togglePanel()
+        // KeyboardShortcuts 3.x（Swift 6）将 API 标记为 @MainActor；
+        // applicationDidFinishLaunching 必在主线程，用 assumeIsolated 满足隔离检查
+        MainActor.assumeIsolated {
+            KeyboardShortcuts.onKeyUp(for: .togglePanel) { [weak self] in
+                self?.togglePanel()
+            }
         }
     }
 
